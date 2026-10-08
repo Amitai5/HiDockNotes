@@ -1,0 +1,50 @@
+{
+  "name": "hidocknotes-app",
+  "version": "0.4.1",
+  "description": "A private recording library for HiDock devices.",
+  "main": "out/main/index.js",
+  "license": "MIT",
+  "author": "HiDockNotes contributors",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "package:win": "electron-builder --config electron-builder.config.cjs --win nsis --x64",
+    "package:mac": "electron-builder --config electron-builder.config.cjs --mac dmg"
+  },
+  "dependencies": {
+    "@google/genai": "2.28.0",
+    "@hidock/jensen-protocol": "file:../../packages/jensen-protocol",
+    "@radix-ui/react-alert-dialog": "^1.1.15",
+    "@radix-ui/react-dialog": "^1.1.2",
+    "@radix-ui/react-switch": "^1.1.1",
+    "better-sqlite3": "13.0.3",
+    "ffmpeg-static": "5.3.0",
+    "lucide-react": "0.460.0",
+    "openai": "7.30.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "^7.18.2",
+    "sherpa-onnx-node": "1.13.8",
+    "usb": "2.17.0",
+    "zustand": "^5.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.3",
+    "electron": "44.4.1",
+    "electron-builder": "26.17.0",
+    "electron-vite": "5.0.0",
+    "jsdom": "^27.4.0",
+    "tailwindcss": "4.3.3",
+    "vite": "7.3.1",
+    "vitest": "^4.1.11"
+  }
+}

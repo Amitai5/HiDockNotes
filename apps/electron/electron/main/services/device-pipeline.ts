@@ -1,0 +1,770 @@
+// Adapted from sgeraldes/hidock-next-2 @ 31d44da (MIT).
+/**
+ * DevicePipelineService — the single main-process coordinator for all USB
+ * device activity (Slice 3 of the USB Device Pipeline refactor).
+ *
+ * Design: docs/superpowers/specs/2026-03-26-usb-device-pipeline-design.md
+ * Rationale: .claude/architecture-decisions/ADR-0005-device-actions-flow-through-coordinators.md
+ *
+ * Responsibilities (per spec §"DevicePipelineService"):
+ *  - Owns ONE JensenDevice (the existing main-process singleton) and the existing
+ *    DownloadService — it never creates a second JensenDevice (USB contention) or
+ *    a second download queue.
+ *  - Runs the strictly-linear phase machine on connect:
+ *      CONNECT → INIT → SCAN → RECONCILE → DOWNLOAD → IDLE
+ *  - SCAN is skipped when the device file count is unchanged from cache.
+ *  - DOWNLOAD is SCOPED to the requested file set — it never blanket-drains the
+ *    whole pending queue (kills the "download one → downloads all" defect).
+ *  - After a file downloads, post-processing (transcription) is left to the
+ *    Slice-2 single funnel: the RecordingWatcher detecting the saved file calls
+ *    `queueTranscriptionIfEnabled`. This service NEVER re-implements the
+ *    auto-transcribe gate; it only invokes the existing funnel (gated inside).
+ *  - Auto-connect: the USB plug listener is ALWAYS registered and re-reads
+ *    `config.device.autoConnect` INSIDE the handler at event time, so toggling
+ *    the preference takes effect live (spec §"Auto-Connect Flow"; ADR-0005 C).
+ *
+ * ⚠ ADDITIVE-ONLY (Slice 3). This service is built and unit-tested but NOT yet
+ * wired into index.ts and registers NO IPC handlers — the cutover to it as the
+ * sole initiator happens in Slices 4-6. It exposes an EventEmitter so a later
+ * slice can bridge `device-pipeline:*` IPC without touching this file.
+ *
+ * Dependencies are injected via the constructor (with real-singleton defaults)
+ * purely so the unit tests can drive the phase machine with mocks and NEVER
+ * touch real USB hardware (CLAUDE.md device-safety rules).
+ */
+
+import { EventEmitter } from 'events'
+import type { DeviceModel, FileInfo } from '@hidock/jensen-protocol'
+import type { BatteryStatus } from '@hidock/jensen-protocol'
+
+// ---------------------------------------------------------------------------
+// Phase machine
+//
+// The PURE projection types (PipelinePhase / PipelineDeviceState /
+// PipelineDownloadProgress / PipelineState) live in a dependency-free module so
+// the renderer + preload can import them without dragging in this service's
+// main-only graph. Re-exported here so existing imports from this file keep
+// working.
+// ---------------------------------------------------------------------------
+
+export type {
+  PipelinePhase,
+  PipelineDeviceState,
+  PipelineDownloadProgress,
+  PipelineState
+} from '../types/device-pipeline'
+
+import type { PipelinePhase, PipelineState } from '../types/device-pipeline'
+
+/** A file selected for download — the scoped unit the pipeline operates on. */
+export interface DownloadItem {
+  filename: string
+  size: number
+  duration?: number
+  dateCreated?: Date
+  replaces?: { path: string; recordingId: string }
+}
+
+// ---------------------------------------------------------------------------
+// Injected collaborator shapes (structural — keeps the unit tests pure)
+//
+// These intentionally describe ONLY the members the pipeline touches, so a
+// hand-rolled mock satisfies them without re-implementing the whole class.
+// ---------------------------------------------------------------------------
+
+export interface PipelineJensen {
+  connect(signal?: AbortSignal): Promise<boolean>
+  tryConnect(preAuthorizedDevice?: unknown): Promise<boolean>
+  disconnect(): Promise<void>
+  isConnected(): boolean
+  getModel(): DeviceModel
+  getDeviceInfo(): Promise<{ serialNumber: string; versionCode: string; versionNumber: number } | null>
+  getCardInfo(): Promise<{ used: number; capacity: number; free: number } | null>
+  getFileCount(): Promise<{ count: number } | null>
+  getSettings(): Promise<{ autoRecord: boolean } | null>
+  setTime(date: Date): Promise<{ result: string } | null>
+  setAutoRecord(enabled: boolean): Promise<{ result: string } | null>
+  listFiles(
+    onProgress?: (found: number, expected: number) => void,
+    expectedCount?: number,
+    onNewFiles?: (files: FileInfo[]) => void
+  ): Promise<FileInfo[] | null>
+  downloadFile(
+    filename: string,
+    size: number,
+    onChunk: (data: Uint8Array) => void,
+    onProgress?: (received: number) => void,
+    signal?: AbortSignal
+  ): Promise<boolean>
+  deleteFile(filename: string): Promise<{ result: string } | null>
+  getTime?(): Promise<{ time: string } | null>
+  getBatteryStatus?(): Promise<BatteryStatus | null>
+  getRecordingFile?(): Promise<{ recording: string | null } | null>
+  serialNumber: string | null
+  versionCode: string | null
+  onconnect?: () => void
+  ondisconnect?: () => void
+}
+
+export interface PipelineDownloadService {
+  getFilesToSyncBatched(
+    deviceFiles: Array<{ filename: string; size: number; duration: number; dateCreated: Date }>
+  ): Promise<Array<{ filename: string; size: number; duration: number; dateCreated: Date; skipReason?: string }>>
+  processDownload(
+    filename: string,
+    data: Buffer
+  ): Promise<{ success: boolean; filePath?: string; error?: string }>
+  cancelActiveDownloads(reason?: string, origin?: 'user' | 'interrupted'): number
+  queueDownloads?(files: Array<{ filename: string; size: number; dateCreated?: Date; replaces?: DownloadItem['replaces'] }>, explicit?: boolean): { queued: string[]; skipped: unknown[] }
+  getState?(): { queue: Array<{ filename: string; status: string; replaces?: DownloadItem['replaces'] }> }
+  updateProgress?(filename: string, bytes: number): void
+  markFailed?(filename: string, reason: string): boolean
+}
+
+/** Minimal WebUSB-like event target for the hot-plug listeners. */
+export interface PipelineUsbEvents {
+  addEventListener(type: 'connect' | 'disconnect', listener: (event: { device: unknown }) => void): void
+  removeEventListener(type: 'connect' | 'disconnect', listener: (event: { device: unknown }) => void): void
+  getDevices(): Promise<unknown[]>
+}
+
+export interface DevicePipelineOptions {
+  /** Reads the persisted config; used at ACTION TIME for the auto-connect gate. */
+  getConfig?: () => { device?: { autoConnect?: boolean; autoDownload?: boolean } }
+  verifyDownload?: (filename: string, path: string) => Promise<void>
+  canDelete?: (filename: string) => Promise<boolean>
+  onScan?: (files: FileInfo[]) => void
+  replacementFor?: (filename: string, size: number) => DownloadItem['replaces']
+  onError?: (message: string) => void
+  /** Slice-2 single transcription funnel (gate is INSIDE this fn — never duplicated). */
+  queueTranscriptionIfEnabled?: (recordingId: string) => boolean
+  /** Resolves a recording id from a saved filename (for the funnel call). */
+  getRecordingByFilename?: (filename: string) => { id: string } | null | undefined
+  /** WebUSB-like event source for hot-plug auto-connect; optional in tests. */
+  usbEvents?: PipelineUsbEvents
+  /** Predicate identifying a HiDock device from a plug event (default: accept all). */
+  isHiDockDevice?: (device: unknown) => boolean
+}
+
+const INITIAL_STATE: PipelineState = {
+  phase: 'disconnected',
+  device: null,
+  scanProgress: null,
+  downloadProgress: null,
+  error: null
+}
+
+export class DevicePipelineService extends EventEmitter {
+  private jensen: PipelineJensen
+  private downloadService: PipelineDownloadService
+  private opts: DevicePipelineOptions
+
+  private state: PipelineState = { ...INITIAL_STATE }
+
+  private cachedFiles: FileInfo[] | null = null
+  private cachedFileCount = -1
+
+  private abortController: AbortController | null = null
+  private autoConnectListenersBound = false
+  /** Upper bound on any single native USB connect call before it's treated as failed. */
+  private static readonly CONNECT_TIMEOUT_MS = 12_000
+  /** Minimum gap between streaming file-list snapshots during a scan. */
+  private static readonly FILES_EMIT_INTERVAL_MS = 250
+  private connectHandler: ((event: { device: unknown }) => void) | null = null
+  private disconnectHandler: ((event: { device: unknown }) => void) | null = null
+  private action: Promise<unknown> | null = null
+  private activeRecording: string | null | undefined
+
+  constructor(
+    jensen: PipelineJensen,
+    downloadService: PipelineDownloadService,
+    options: DevicePipelineOptions = {}
+  ) {
+    super()
+    this.jensen = jensen
+    this.downloadService = downloadService
+    this.opts = options
+  }
+
+  // ==========================================================================
+  // State + emitter (NOT wired to ipcMain yet — Slice 4 bridges this)
+  // ==========================================================================
+
+  getState(): PipelineState {
+    return this.state
+  }
+
+  getFiles(): FileInfo[] {
+    return this.cachedFiles ?? []
+  }
+  getActiveRecording(): string | null | undefined { return this.activeRecording }
+  notifyDisconnected(): void {
+    this.abortController?.abort()
+    this.downloadService.cancelActiveDownloads('Device disconnected', 'interrupted')
+    this.cachedFiles = null
+    this.cachedFileCount = -1
+    this.state = { ...INITIAL_STATE }
+    this.emit('state', this.state)
+  }
+
+  private setPhase(phase: PipelinePhase): void {
+    this.state = { ...this.state, phase }
+    this.emit('state', this.state)
+  }
+
+  private patchState(patch: Partial<PipelineState>): void {
+    this.state = { ...this.state, ...patch }
+    this.emit('state', this.state)
+  }
+
+  private setError(message: string): void {
+    this.state = { ...this.state, phase: 'error', error: message }
+    this.emit('state', this.state)
+  }
+
+  /**
+   * Bound any native USB call so a stuck/locked device (libusb blocking with no
+   * resolution) can never leave the phase machine hung on 'connecting'. Without
+   * this, a blocked `jensen.connect()` never resolves, so neither the success
+   * nor the `setError` branch runs and the status sits on "Connecting…" forever
+   * (the renderer's own 10s countdown can't help if the renderer itself stalls).
+   * On timeout the promise rejects → `safe()` returns null → caller sets 'error'.
+   */
+  private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+      timer?.unref?.()
+    })
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer)
+    }) as Promise<T>
+  }
+
+  // ==========================================================================
+  // Phase machine — strictly linear (spec §"Phase Sequence on Connect")
+  // ==========================================================================
+
+  async runPipeline(): Promise<void> {
+    // INIT
+    this.setPhase('initializing')
+    const initOk = await this.initialize()
+    if (!initOk) {
+      await this.handleInitFailure()
+      return
+    }
+
+    if (this.aborted()) return
+
+    // SCAN (skipped if recording count unchanged)
+    if (this.shouldScan()) {
+      this.setPhase('scanning')
+      const files = await this.scanFiles()
+      this.cachedFiles = files
+      this.cachedFileCount = this.state.device?.recordingCount ?? 0
+      this.opts.onScan?.(files)
+      this.emit('files', this.getFiles())
+    }
+
+    if (this.aborted()) return
+
+    // RECONCILE (CPU only — no USB)
+    this.setPhase('reconciling')
+    const toDownload = await this.reconcile(this.cachedFiles ?? [])
+
+    if (this.aborted()) return
+
+    // DOWNLOAD (sequential, scoped to the reconciled set)
+    if (toDownload.length > 0 && (this.opts.getConfig?.().device?.autoDownload ?? true)) {
+      this.setPhase('downloading')
+      await this.downloadAll(toDownload)
+    }
+
+    if (this.aborted()) return
+
+    this.patchState({ downloadProgress: null })
+    this.setPhase('idle')
+  }
+
+  // ==========================================================================
+  // INIT
+  // ==========================================================================
+
+  /**
+   * Populate device state: info, storage, file count, settings, time sync.
+   * Returns false only when EVERY command failed (total init failure) — partial
+   * success continues with whatever data is available (spec Error Handling table).
+   */
+  async initialize(): Promise<boolean> {
+    let anySucceeded = false
+
+    const info = await this.safe(() => this.jensen.getDeviceInfo())
+    if (info) anySucceeded = true
+
+    const card = await this.safe(() => this.jensen.getCardInfo())
+    if (card) anySucceeded = true
+
+    const fileCount = await this.safe(() => this.jensen.getFileCount())
+    if (fileCount) anySucceeded = true
+
+    const settings = await this.safe(() => this.jensen.getSettings())
+    if (settings) anySucceeded = true
+
+    const timeResult = this.jensen.getTime ? await this.safe(() => this.jensen.getTime!()) : null
+    if (timeResult) anySucceeded = true
+    const battery = this.jensen.getBatteryStatus ? await this.safe(() => this.jensen.getBatteryStatus!()) : null
+    const recording = this.jensen.getRecordingFile ? await this.safe(() => this.jensen.getRecordingFile!()) : null
+    this.activeRecording = this.jensen.getRecordingFile ? recording?.recording : null
+
+    if (!anySucceeded) return false
+
+    const recordingCount = fileCount?.count ?? this.state.device?.recordingCount ?? 0
+
+    this.patchState({
+      device: {
+        model: this.jensen.getModel(),
+        serialNumber: info?.serialNumber ?? this.jensen.serialNumber ?? null,
+        firmwareVersion: info?.versionCode ?? this.jensen.versionCode ?? null,
+        storage: card
+          ? {
+              used: card.used,
+              capacity: card.capacity,
+              freePercent: card.capacity > 0 ? Math.round((card.free / card.capacity) * 100) : 0
+            }
+          : null,
+        settings: settings ? { autoRecord: settings.autoRecord } : null,
+        recordingCount,
+        battery,
+        time: timeResult?.time ?? null
+      },
+      error: null
+    })
+
+    return true
+  }
+
+  /**
+   * Total init failure: USB reset → reconnect → retry the pipeline ONCE. If it
+   * still fails, disconnect cleanly and surface an error (spec §"Init failure").
+   */
+  private async handleInitFailure(): Promise<void> {
+    // Never reset firmware to recover an init failure. The injected adapter
+    // holds the command serializer through settlement and closes gracefully.
+    await this.safe(() => this.jensen.disconnect())
+    this.setError('Device initialization failed. Please unplug and reconnect.')
+  }
+
+  // ==========================================================================
+  // SCAN
+  // ==========================================================================
+
+  /**
+   * Skip SCAN when the cached file list is still valid: we already have files
+   * AND the device's recording count is unchanged AND there is at least one file.
+   * (spec shouldScan)
+   */
+  shouldScan(): boolean {
+    const deviceCount = this.state.device?.recordingCount ?? 0
+    return this.cachedFiles === null || this.cachedFileCount !== deviceCount || deviceCount === 0
+  }
+
+  async scanFiles(): Promise<FileInfo[]> {
+    const expected = this.state.device?.recordingCount ?? 0
+    const streamedFiles: FileInfo[] = []
+    const onProgress = (current: number, total: number): void => {
+      this.patchState({ scanProgress: { current, total } })
+    }
+    // Copying and broadcasting the whole growing list on every USB packet is
+    // O(N^2) over a 2,000-file scan. Publish the first packet at once, then at
+    // most every FILES_EMIT_INTERVAL_MS; the caller emits the complete list
+    // when the scan returns.
+    let lastEmitAt = 0
+    const onNewFiles = (files: FileInfo[]): void => {
+      streamedFiles.push(...files)
+      const now = Date.now()
+      if (lastEmitAt === 0 || now - lastEmitAt >= DevicePipelineService.FILES_EMIT_INTERVAL_MS) {
+        lastEmitAt = now
+        this.emit('files', [...streamedFiles])
+      }
+    }
+    const files = await this.safe(() => this.jensen.listFiles(onProgress, expected, onNewFiles))
+    this.patchState({ scanProgress: null })
+    return files ?? []
+  }
+
+  // ==========================================================================
+  // RECONCILE (CPU only — delegates to DownloadService)
+  // ==========================================================================
+
+  async reconcile(files: FileInfo[]): Promise<DownloadItem[]> {
+    const deviceFiles = files.map((f) => ({
+      filename: f.name,
+      size: f.length,
+      duration: f.duration,
+      dateCreated: f.time ?? new Date()
+    }))
+
+    const reconciled = await this.downloadService.getFilesToSyncBatched(deviceFiles)
+    const newest = [...deviceFiles].sort((a, b) => b.dateCreated.getTime() - a.dateCreated.getTime())[0]?.filename
+    return reconciled
+      .filter((r) => !r.skipReason)
+      .filter(r => r.filename !== this.activeRecording)
+      .filter(r => this.activeRecording === null || r.filename !== newest)
+      .map((r) => ({
+        filename: r.filename,
+        size: r.size,
+        duration: r.duration,
+        dateCreated: r.dateCreated,
+        replaces: this.opts.replacementFor?.(r.filename, r.size)
+      }))
+  }
+
+  // ==========================================================================
+  // DOWNLOAD — scoped & sequential
+  // ==========================================================================
+
+  async downloadAll(files: DownloadItem[], explicit = false): Promise<void> {
+    if (!this.abortController) this.abortController = new AbortController()
+    const sorted = [...files].sort((a, b) => (b.dateCreated?.getTime() ?? 0) - (a.dateCreated?.getTime() ?? 0))
+    const queued = this.downloadService.queueDownloads?.(sorted, explicit)
+
+    let index = 0
+    for (const file of sorted) {
+      const pending = this.downloadService.getState?.().queue.find(item => item.filename === file.filename)
+      if (queued && !queued.queued.includes(file.filename) && pending?.status !== 'pending') continue
+      index++
+      if (this.abortController?.signal.aborted) break
+      if (!this.jensen.isConnected()) break
+      await this.downloadOne(file, index, files.length)
+    }
+  }
+
+  /**
+   * Download a SINGLE file and hand it to DownloadService for save + state.
+   * Post-download transcription is intentionally NOT triggered here — the
+   * Slice-2 RecordingWatcher funnel owns the (gated) queueing. We invoke the
+   * single funnel only as a best-effort belt-and-braces when a recording row is
+   * resolvable, never re-checking the auto-transcribe preference ourselves.
+   */
+  async downloadOne(
+    file: DownloadItem,
+    current = 1,
+    total = 1
+  ): Promise<{ success: boolean; filePath?: string; error?: string }> {
+    const chunks: Uint8Array[] = []
+    let bytesDownloaded = 0
+    let lastProgressAt = 0
+
+    this.patchState({
+      downloadProgress: {
+        filename: file.filename,
+        current,
+        total,
+        bytesDownloaded: 0,
+        totalBytes: file.size,
+        eta: null
+      }
+    })
+
+    const onChunk = (data: Uint8Array): void => {
+      chunks.push(data)
+    }
+    const onProgress = (received: number): void => {
+      bytesDownloaded = received
+      this.downloadService.updateProgress?.(file.filename, received)
+      const now = Date.now()
+      if (lastProgressAt && now - lastProgressAt < 250 && received < file.size) return
+      lastProgressAt = now
+      this.patchState({
+        downloadProgress: {
+          filename: file.filename,
+          current,
+          total,
+          bytesDownloaded: received,
+          totalBytes: file.size,
+          eta: null
+        }
+      })
+    }
+
+    const ok = await this.safe(() =>
+      this.jensen.downloadFile(
+        file.filename,
+        file.size,
+        onChunk,
+        onProgress,
+        this.abortController?.signal
+      )
+    )
+
+    if (!ok) {
+      this.downloadService.markFailed?.(file.filename, 'Download failed or interrupted. Retry to fetch the complete file.')
+      return { success: false, error: 'Download failed or aborted' }
+    }
+
+    // Assemble the transferred bytes and hand off to DownloadService, which
+    // performs the integrity check + save + sync-state (one queue, one check).
+    const total2 = chunks.reduce((n, c) => n + c.length, 0)
+    const merged = Buffer.alloc(total2)
+    let offset = 0
+    for (const c of chunks) {
+      merged.set(c, offset)
+      offset += c.length
+    }
+    void bytesDownloaded // progress already emitted; kept for clarity
+
+    const result = await this.downloadService.processDownload(file.filename, merged)
+
+    if (result.success) {
+      if (result.filePath && this.opts.verifyDownload) {
+        await this.opts.verifyDownload(file.filename, result.filePath)
+        this.emit('files', this.getFiles())
+      }
+      this.triggerTranscriptionFunnel(file.filename)
+    }
+
+    return result
+  }
+
+  /**
+   * Invoke the SINGLE Slice-2 transcription funnel (gate lives inside it). Never
+   * duplicates the auto-transcribe preference check. Best-effort: a failure to
+   * resolve the recording row simply means the RecordingWatcher funnel will pick
+   * it up when the file lands on disk.
+   */
+  private triggerTranscriptionFunnel(filename: string): void {
+    const resolve = this.opts.getRecordingByFilename
+    const funnel = this.opts.queueTranscriptionIfEnabled
+    if (!resolve || !funnel) return
+    try {
+      const rec = resolve(filename) ?? resolve(filename.replace(/\.hda$/i, '.mp3'))
+      if (rec?.id) funnel(rec.id)
+    } catch {
+      /* best-effort — RecordingWatcher remains the authoritative funnel */
+    }
+  }
+
+  // ==========================================================================
+  // User actions
+  // ==========================================================================
+
+  /** Manual connect — never passes through the auto-connect gate (always works). */
+  async connect(): Promise<boolean> {
+    if (this.action) return this.action as Promise<boolean>
+    const action = this.connectInternal()
+    this.action = action
+    try { return await action } finally { if (this.action === action) this.action = null }
+  }
+
+  private async connectInternal(): Promise<boolean> {
+    if (this.jensen.isConnected() && this.state.device !== null) { await this.runPipeline(); return true }
+    this.abortController = new AbortController()
+    this.setPhase('connecting')
+    const ok = await this.safe(() =>
+      this.withTimeout(
+        Promise.resolve(this.jensen.connect(this.abortController?.signal)),
+        DevicePipelineService.CONNECT_TIMEOUT_MS,
+        'device connect'
+      )
+    )
+    if (!ok) {
+      this.abortController?.abort()
+      this.setError(
+        'Device found but the connection did not complete — it may be busy or the USB interface is stuck. Unplug and replug the HiDock, then retry.'
+      )
+      return false
+    }
+    await this.runPipeline()
+    return true
+  }
+
+  async disconnect(): Promise<void> {
+    this.abortController?.abort()
+    this.downloadService.cancelActiveDownloads('Device disconnected')
+    if (this.action) await this.action.catch(() => undefined)
+    await this.safe(() => this.jensen.disconnect())
+    this.cachedFiles = null
+    this.cachedFileCount = -1
+    this.state = { ...INITIAL_STATE }
+    this.emit('state', this.state)
+  }
+
+  /** Re-scan: abort any in-flight downloads, invalidate cache, re-run pipeline. */
+  async manualSync(): Promise<void> {
+    if (this.action || !this.jensen.isConnected()) return
+    this.abortController?.abort()
+    this.downloadService.cancelActiveDownloads('Re-sync requested')
+    // Force a fresh scan regardless of the cached count.
+    this.cachedFiles = null
+    this.cachedFileCount = -1
+    this.abortController = new AbortController()
+    const action = this.runPipeline()
+    this.action = action
+    try { await action } finally { if (this.action === action) this.action = null }
+  }
+
+  async pollForNewRecordings(): Promise<void> {
+    if (this.action || this.state.phase !== 'idle' || !this.jensen.isConnected()) return
+    const action = this.pollInternal()
+    this.action = action
+    try { await action } finally { if (this.action === action) this.action = null }
+  }
+
+  private async pollInternal(): Promise<void> {
+    const previous = this.activeRecording
+    const recording = this.jensen.getRecordingFile ? await this.safe(() => this.jensen.getRecordingFile!()) : null
+    if (recording) this.activeRecording = recording.recording
+    const count = await this.safe(() => this.jensen.getFileCount())
+    if (count && (count.count !== this.cachedFileCount || previous !== this.activeRecording)) {
+      this.cachedFiles = null
+      this.cachedFileCount = -1
+      this.abortController = new AbortController()
+      await this.runPipeline()
+    }
+  }
+
+  /** Cancel downloads only — return to IDLE without disconnecting. */
+  async cancelDownloads(): Promise<void> {
+    this.abortController?.abort()
+    // HIGH-3: an explicit user cancel stays terminal until a MANUAL retry.
+    this.downloadService.cancelActiveDownloads('Cancelled by user', 'user')
+    if (this.action) await this.action.catch(() => undefined)
+    this.patchState({ downloadProgress: null })
+    this.setPhase('idle')
+  }
+
+  async deleteFile(filename: string): Promise<{ result: string } | null> {
+    if (this.action) throw new Error('Wait for the current operation to finish.')
+    if (!this.opts.canDelete || !await this.opts.canDelete(filename)) throw new Error('A verified local copy is required before deleting from the device.')
+    return this.safe(() => this.jensen.deleteFile(filename))
+  }
+
+  async downloadSelected(filenames: string[]): Promise<void> {
+    if (this.action || !this.jensen.isConnected()) throw new Error('Connect the device and wait until it is ready.')
+    this.abortController = new AbortController()
+    const action = Promise.resolve().then(() => this.downloadSelectedInternal(filenames))
+    this.action = action
+    try { await action } finally {
+      if (this.action === action) this.action = null
+      this.patchState({ downloadProgress: null })
+      if (this.jensen.isConnected()) this.setPhase('idle')
+    }
+  }
+
+  private async downloadSelectedInternal(filenames: string[]): Promise<void> {
+    if (this.jensen.getRecordingFile) {
+      const recording = await this.jensen.getRecordingFile()
+      this.activeRecording = recording?.recording
+    }
+    if (this.aborted()) return
+    const newest = [...this.getFiles()].sort((a, b) => (b.time?.getTime() ?? 0) - (a.time?.getTime() ?? 0))[0]?.name
+    const files = this.getFiles().filter(f => filenames.includes(f.name))
+    if (files.length !== filenames.length || files.some(f => f.name === this.activeRecording || (this.activeRecording !== null && f.name === newest))) throw new Error('The file is unavailable or the device may still be recording it. Refresh and retry.')
+    this.setPhase('downloading')
+    await this.downloadAll(files.map(f => ({ filename: f.name, size: f.length, duration: f.duration, dateCreated: f.time ?? undefined, replaces: this.opts.replacementFor?.(f.name, f.length) })), true)
+  }
+
+  async syncTime(): Promise<void> {
+    if (this.action) throw new Error('Wait for the current operation to finish.')
+    const date = new Date()
+    const result = await this.jensen.setTime(date)
+    if (!result || result.result !== 'success') throw new Error('Could not sync device time.')
+    if (this.state.device) this.patchState({ device: { ...this.state.device, time: date.toISOString() } })
+  }
+
+  async setAutoRecord(enabled: boolean): Promise<{ result: string } | null> {
+    if (this.action) throw new Error('Wait for the current operation to finish.')
+    const result = await this.safe(() => this.jensen.setAutoRecord(enabled))
+    if (result?.result === 'success' && this.state.device) {
+      this.patchState({
+        device: { ...this.state.device, settings: { autoRecord: enabled } }
+      })
+    }
+    return result
+  }
+
+  // ==========================================================================
+  // Auto-connect — listener ALWAYS registered, policy re-checked AT EVENT TIME
+  // (spec §"Auto-Connect Flow"; ADR-0005 category C)
+  // ==========================================================================
+
+  async initAutoConnect(): Promise<void> {
+    const usb = this.opts.usbEvents
+    if (usb && !this.autoConnectListenersBound) {
+      const isHiDock = this.opts.isHiDockDevice ?? (() => true)
+
+      this.connectHandler = (event: { device: unknown }) => {
+        if (!isHiDock(event.device)) return
+        // Event-time policy gate — re-read the preference EVERY time it fires.
+        if (!this.autoConnectEnabled()) return
+        void this.connect()
+      }
+      this.disconnectHandler = (_event: { device: unknown }) => {
+        if (!isHiDock(_event.device)) return
+        void this.handleDisconnect()
+      }
+
+      usb.addEventListener('connect', this.connectHandler)
+      usb.addEventListener('disconnect', this.disconnectHandler)
+      this.autoConnectListenersBound = true
+    }
+
+    // Startup: only auto-connect to an already-attached device if enabled NOW.
+    if (!this.autoConnectEnabled()) return
+    if (!usb) return
+    const devices = await this.safe(() => usb.getDevices())
+    const hidock = (devices ?? []).find((d) => (this.opts.isHiDockDevice ?? (() => true))(d))
+    if (hidock) await this.connect()
+  }
+
+  removeAutoConnect(): void {
+    const usb = this.opts.usbEvents
+    if (!usb || !this.autoConnectListenersBound) return
+    if (this.connectHandler) usb.removeEventListener('connect', this.connectHandler)
+    if (this.disconnectHandler) usb.removeEventListener('disconnect', this.disconnectHandler)
+    this.connectHandler = null
+    this.disconnectHandler = null
+    this.autoConnectListenersBound = false
+  }
+
+  private autoConnectEnabled(): boolean {
+    try {
+      return this.opts.getConfig?.().device?.autoConnect ?? false
+    } catch {
+      return false
+    }
+  }
+
+  private async handleDisconnect(): Promise<void> {
+    await this.disconnect()
+  }
+
+  // ==========================================================================
+  // Internals
+  // ==========================================================================
+
+  private aborted(): boolean {
+    return this.abortController?.signal.aborted ?? false
+  }
+
+  /** Run a device call, swallowing throws to null so one bad command can't crash the phase machine. */
+  private async safe<T>(fn: () => Promise<T> | T): Promise<T | null> {
+    try {
+      return await fn()
+    } catch (error) {
+      this.opts.onError?.(error instanceof Error ? error.message : 'Device operation failed.')
+      return null
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Singleton accessor (lazy — defaults to the REAL Jensen + DownloadService
+// singletons, plus the real config / transcription funnel). NOT registered in
+// index.ts during Slice 3; a later slice wires it + IPC.
+// ---------------------------------------------------------------------------
+
+// NOTE: the real-singleton accessor getDevicePipelineService() lives in
+// device-pipeline-instance.ts (static imports, bundler-safe). This module
+// exports only the class + types so it stays importable in unit tests without
+// loading the Electron / native-USB module graph.

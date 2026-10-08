@@ -1,0 +1,38 @@
+{
+  "name": "hidocknotes",
+  "version": "0.4.1",
+  "private": true,
+  "license": "MIT",
+  "workspaces": [
+    "apps/electron",
+    "packages/jensen-protocol"
+  ],
+  "allowScripts": {
+    "electron": true,
+    "usb": true,
+    "ffmpeg-static": true,
+    "esbuild": true,
+    "electron-winstaller": false,
+    "better-sqlite3": false,
+    "@hidock/jensen-protocol": true,
+    "@google/genai": false,
+    "protobufjs": false
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/electron",
+    "build": "npm run build --workspace=packages/jensen-protocol && npm run build --workspace=apps/electron",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint apps/electron packages/jensen-protocol/src packages/jensen-protocol/tests",
+    "test": "npm run test --workspaces --if-present",
+    "start": "npm run start --workspace=apps/electron",
+    "package:win": "npm run build && npm run package:win --workspace=apps/electron",
+    "package:mac": "npm run build && npm run package:mac --workspace=apps/electron"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/w3c-web-usb": "^1.0.13",
+    "eslint": "10.12.0",
+    "typescript": "~5.6.3",
+    "typescript-eslint": "8.71.0"
+  }
+}

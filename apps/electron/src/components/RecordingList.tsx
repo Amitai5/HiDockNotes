@@ -1,0 +1,8 @@
+import { ArrowUpRight, CheckCircle2, Clock3, FileAudio2, LoaderCircle } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import type { RecordingView } from '../shared/contracts'
+import { formatDuration, formatBytes } from './ui'
+
+export function RecordingList({ recordings }: { recordings: RecordingView[] }): JSX.Element {
+  return <div className="recording-list">{recordings.map(r => <Link className="recording-row" key={r.id} to={`/library/${r.id}`}><div className="recording-art"><FileAudio2 size={22} /></div><div className="recording-main"><h3>{r.title || r.filename}</h3><p>{new Date(r.recordedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} <span>·</span> {formatDuration(r.duration)} <span>·</span> {formatBytes(r.size)}{r.verified && r.status !== 'done' && <><span>·</span><span className="recording-saved">Downloaded</span></>}</p>{r.status !== 'queued' && ['converting', 'diarizing', 'transcribing', 'identifying', 'summarizing'].includes(r.status) && r.processingMessage && <p className="recording-processing">{r.processingMessage}</p>}</div><span className={`status ${r.status === 'failed' ? 'status-failed' : r.status === 'queued' ? 'status-waiting' : r.verified ? 'status-verified' : ''}`}>{r.status === 'queued' ? <Clock3 size={13} /> : ['converting', 'transcribing', 'diarizing', 'identifying', 'summarizing'].includes(r.status) ? <LoaderCircle className="animate-spin" size={13} /> : r.verified ? <CheckCircle2 size={13} /> : null}{r.status === 'queued' ? `Waiting${r.queuePosition ? ` · #${r.queuePosition}` : ''}` : r.status === 'diarizing' ? 'Detecting speakers' : r.status.replace('-', ' ')}</span><ArrowUpRight size={16} className="muted" /></Link>)}</div>
+}
