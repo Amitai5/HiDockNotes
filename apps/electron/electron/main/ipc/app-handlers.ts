@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
-import { readFile, writeFile, stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join, basename, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import product from '../../../product.json'
@@ -11,9 +11,12 @@ import { getDevicePipelineService } from '../services/device-pipeline-instance'
 import { getActivityLog, clearActivityLog, emitActivityLog } from '../services/activity-log'
 import { verifySavedFile } from '../services/file-verification'
 import { readWaveform } from '../services/audio-playback'
-import { exportTranscript, type TranscriptFormat } from '../services/transcript-export'
+import { exportFilename, exportNotesFile, exportNotesWithAudio, validateExportOptions } from '../services/recording-export'
+import type { TranscriptFormat } from '../../../src/shared/export'
+import { updateActionable } from '../services/actionables'
 import { handle, listen } from './trusted-ipc'
 import { validateText, validateBoolean, validateId } from './jensen-validation'
+import { libraryNavigation } from '../services/database'
 import type { AppSettings } from '../../../src/shared/contracts'
 
 export function readSettings(): AppSettings { return getSettings(join(getDataPath(), 'recordings')) }
@@ -50,6 +53,7 @@ export function registerAppHandlers(window: BrowserWindow): void {
   handle('storage:open', async () => { const error = await shell.openPath(getRecordingsPath()); if (error) throw new Error(error) })
   handle('library:list', (search, status) => listRecordings(search === undefined ? '' : validateText(search, 500), status === undefined ? '' : validateText(status, 40)))
   handle('library:detail', id => getDetail(validateId(id)))
+  handle('library:navigation', libraryNavigation)
   handle('library:rename', (id, title) => { renameRecording(validateId(id), validateText(title, 200)); changed() })
   handle('library:waveform', id => readWaveform(validateId(id)))
   handle('library:import', async () => {
@@ -70,24 +74,31 @@ export function registerAppHandlers(window: BrowserWindow): void {
     }
     emitActivityLog('success', `Imported ${imported} recording${imported === 1 ? '' : 's'}.`); changed(); return imported
   })
-  handle('library:export', async id => {
+  handle('library:export', async (id, value) => {
     const detail = getDetail(validateId(id))
-    const result = await dialog.showSaveDialog(window, { defaultPath: basename(detail.recording.filename, extname(detail.recording.filename)) + '.md', filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }, { name: 'SubRip subtitles', extensions: ['srt'] }, { name: 'WebVTT subtitles', extensions: ['vtt'] }] })
+    const options = validateExportOptions(value)
+    if (options.includeAudio) {
+      const target = await dialog.showOpenDialog(window, { title: 'Choose a folder for notes and audio', properties: ['openDirectory', 'createDirectory'] })
+      if (target.canceled || !target.filePaths[0]) return false
+      await exportNotesWithAudio(detail, target.filePaths[0], options)
+      emitActivityLog('success', 'Exported recording notes and verified playable audio.')
+      return true
+    }
+    const formats = [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }, { name: 'SubRip subtitles', extensions: ['srt'] }, { name: 'WebVTT subtitles', extensions: ['vtt'] }]
+    const name = exportFilename(detail.recording.title || basename(detail.recording.filename, extname(detail.recording.filename)))
+    const result = await dialog.showSaveDialog(window, { defaultPath: name + '.' + options.format, filters: value === undefined ? formats : formats.filter(format => format.extensions.includes(options.format)) })
     if (result.canceled || !result.filePath) return false
     const extension = extname(result.filePath).slice(1).toLowerCase()
     if (!['md', 'txt', 'srt', 'vtt'].includes(extension)) throw new Error('Choose Markdown, TXT, SRT or VTT for the export.')
-    await writeFile(result.filePath, exportTranscript(detail, extension as TranscriptFormat), 'utf8'); return true
+    if (value !== undefined && extension !== options.format) throw new Error('Use the selected export file format.')
+    await exportNotesFile(detail, result.filePath, { ...options, format: extension as TranscriptFormat }); return true
   })
   handle('projects:list', listProjects)
   handle('projects:create', name => { const text = validateText(name, 80); if (!text) throw new Error('Give the project a name.'); const project = createProject(text); changed(); return project })
   handle('projects:assign', (recording, project) => { run('UPDATE recordings SET project_id=? WHERE id=?', [project === null ? null : validateId(project), validateId(recording)]); changed() })
   handle('actionables:list', listActionables)
   handle('actionables:update', (id, value) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid action item.')
-    const patch = value as Record<string, unknown>
-    if (Object.keys(patch).some(k => k !== 'done' && k !== 'text')) throw new Error('Invalid action item field.')
-    if (patch.done !== undefined) run('UPDATE actionables SET done=? WHERE id=?', [Number(validateBoolean(patch.done)), validateId(id)])
-    if (patch.text !== undefined) run('UPDATE actionables SET text=? WHERE id=?', [validateText(patch.text, 2000), validateId(id)])
+    updateActionable(validateId(id), value)
     changed()
   })
   handle('activity-log:list', getActivityLog)

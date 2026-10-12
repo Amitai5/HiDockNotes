@@ -30,14 +30,14 @@ export interface RecordingCitation { number: number; recordingId: string; title:
 export interface AssistantAnswer { text: string; citations: RecordingCitation[] }
 
 export const DEFAULT_AI_SETTINGS: AISettings = {
-  transcription: { provider: 'local', model: 'whisper-small' },
+  transcription: { provider: 'local', model: 'whisper-base' },
   chat: { provider: 'gemini', model: 'gemini-3.5-flash' },
   autoTranscribe: true, language: 'auto', summaryTemplate: 'meeting', customPrompt: '',
   suggestThreshold: 0.6, autoAssignThreshold: 0.75
 }
 export const LOCAL_TRANSCRIPTION_MODELS: ModelChoice[] = [
-  { id: 'whisper-small', name: 'Whisper Small · multilingual · balanced accuracy', transcription: true, chat: false },
-  { id: 'whisper-base', name: 'Whisper Base · multilingual · faster', transcription: true, chat: false }
+  { id: 'whisper-base', name: 'Whisper Base · multilingual · faster (recommended)', transcription: true, chat: false },
+  { id: 'whisper-small', name: 'Whisper Small · multilingual · higher accuracy, slower', transcription: true, chat: false }
 ]
 export const DEFAULT_MODELS: Record<ProviderId, ModelChoice[]> = {
   gemini: [

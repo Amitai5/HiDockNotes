@@ -171,4 +171,28 @@ describe('persistent single-recording processing queue', () => {
     expect(runner.run).toHaveBeenCalledOnce()
     expect(getDetail(id).recording.status).toBe('done')
   })
+  it('recovers only verified jobs affected by the fixed legacy Whisper timing error', () => {
+    const affected = recording(), unrelated = recording(1), unverified = recording(2, false), completed = recording(3)
+    for (const [id, stage, error] of [[affected, 'failed', 'Local Whisper returned invalid segment timestamps. Retry the recording.'], [unrelated, 'failed', 'The saved audio changed after verification.'], [unverified, 'failed', 'Local Whisper returned invalid segment timestamps. Retry the recording.'], [completed, 'done', null]] as const) {
+      run('INSERT INTO transcription_jobs(id, recording_id, stage, error, created_at) VALUES (?, ?, ?, ?, ?)', [id, id, stage, error, '2026-10-07T10:00:00Z'])
+      run('UPDATE recordings SET status=? WHERE id=?', [stage, id])
+    }
+    const activity = vi.fn()
+    queue = new TranscriptionQueue({ vault, settings: () => structuredClone(DEFAULT_AI_SETTINGS), dataPath: '/local', runner: { run: vi.fn(), stop: vi.fn().mockResolvedValue(undefined) }, changed: vi.fn(), activity })
+    queue.start()
+    expect(getDetail(affected).processing).toMatchObject({ stage: 'queued', attempt: 0, error: null })
+    expect(getDetail(unrelated).recording.status).toBe('failed')
+    expect(getDetail(unverified).recording.status).toBe('failed')
+    expect(getDetail(completed).recording.status).toBe('done')
+    expect(activity).toHaveBeenCalledWith('info', expect.stringContaining('1 recording'))
+  })
+  it.each(['automatic-off', 'cloud-selected'])('leaves failed local jobs for explicit retry when %s', scenario => {
+    const id = recording()
+    run("INSERT INTO transcription_jobs(id, recording_id, stage, error, created_at) VALUES ('job', ?, 'failed', 'Local Whisper returned invalid segment timestamps. Retry the recording.', '2026-10-07T10:00:00Z')", [id])
+    run("UPDATE recordings SET status='failed' WHERE id=?", [id])
+    const settings = scenario === 'automatic-off' ? { ...DEFAULT_AI_SETTINGS, autoTranscribe: false } : CLOUD_SETTINGS
+    queue = new TranscriptionQueue({ vault, settings: () => structuredClone(settings), dataPath: '/local', runner: { run: vi.fn(), stop: vi.fn().mockResolvedValue(undefined) }, changed: vi.fn(), activity: vi.fn() })
+    queue.start()
+    expect(getDetail(id).recording.status).toBe('failed')
+  })
 })

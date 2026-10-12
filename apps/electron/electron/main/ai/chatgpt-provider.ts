@@ -4,15 +4,15 @@ import type { TranscriptSegment } from '../../../src/shared/contracts'
 import { ChatGPTPlanBlocked, ChatGPTSessionExpired, chatgptError } from './chatgpt-protocol'
 import { ProcessingError } from './errors'
 import { parseSummary } from './provider-parsing'
-import { SUMMARY_SCHEMA, summaryInstructions, transcriptContent, type AudioChunk, type ProviderClient, type SummaryResult, type TranscriptionResult } from './providers'
+import { SUMMARY_SCHEMA, summaryInstructions, transcriptContent, type AudioChunk, type ProviderClient, type SummaryContext, type SummaryResult, type TranscriptionResult } from './providers'
 
 export type SubscriptionClientFactory = (accessToken: string) => OpenAI
 export class ChatGPTProvider implements ProviderClient {
   constructor(private readonly accessToken: () => Promise<string>, private readonly clientFactory: SubscriptionClientFactory = token => new OpenAI({ apiKey: token, baseURL: 'https://api.openai.com/v1', timeout: 180000, maxRetries: 0, logLevel: 'off' }), private readonly blocked?: (message: string) => void, private readonly sessionSignal?: () => AbortSignal) {}
   async listModels(): Promise<ModelChoice[]> { throw new ProcessingError('Load ChatGPT models from the connected account in Settings.') }
   async transcribe(_model: string, _chunk: AudioChunk): Promise<TranscriptionResult> { throw new ProcessingError('ChatGPT plan usage does not support audio transcription. Choose Gemini or OpenAI for transcription.') }
-  async summarize(model: string, segments: TranscriptSegment[], settings: AISettings, signal?: AbortSignal): Promise<SummaryResult> {
-    const text = await this.respond(model, summaryInstructions(settings), transcriptContent(segments), true, signal)
+  async summarize(model: string, segments: TranscriptSegment[], settings: AISettings, signal?: AbortSignal, context?: SummaryContext): Promise<SummaryResult> {
+    const text = await this.respond(model, summaryInstructions(settings, context), transcriptContent(segments), true, signal)
     return parseSummary(text, Math.max(0, ...segments.map(segment => segment.end)))
   }
   async chat(model: string, instructions: string, content: string, signal?: AbortSignal): Promise<string> { return this.respond(model, instructions, content, false, signal) }

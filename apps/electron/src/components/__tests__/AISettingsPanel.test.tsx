@@ -37,11 +37,11 @@ describe('AI provider setup', () => {
   it('selects local Whisper by default with no key field or local chat option', async () => {
     render(<AISettingsPanel />)
     expect(await screen.findByLabelText('Transcription provider')).toHaveValue('local')
-    expect(screen.getByLabelText('Transcription model')).toHaveValue('whisper-small')
+    expect(screen.getByLabelText('Transcription model')).toHaveValue('whisper-base')
     expect(screen.getByText(/No API key needed/)).toBeVisible()
     expect(screen.getByLabelText('Chat provider').querySelector('option[value="local"]')).toBeNull()
-    fireEvent.change(screen.getByLabelText('Transcription model'), { target: { value: 'whisper-base' } })
-    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({ transcription: { provider: 'local', model: 'whisper-base' } }))
+    fireEvent.change(screen.getByLabelText('Transcription model'), { target: { value: 'whisper-small' } })
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({ transcription: { provider: 'local', model: 'whisper-small' } }))
   })
   it('shows verification failure clearly and never claims a key was saved', async () => {
     verifyKey.mockRejectedValue(new Error('The provider rejected this key.'))

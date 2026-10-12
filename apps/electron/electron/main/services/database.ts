@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readAudioDuration } from './audio-duration'
 import type { ActionableView, AppSettings, ProjectView, RecordingDetail, RecordingView } from '../../../src/shared/contracts'
+import type { LibraryNavigation } from '../../../src/shared/library'
 
 export interface Recording { id: string; filename: string; file_path: string | null; file_size: number; date_recorded: string; duration_seconds: number | null; checksum: string | null; verified: number; status: RecordingView['status']; title: string | null; project_id: string | null }
 let connection: Database.Database | undefined
@@ -50,7 +51,11 @@ const migrations = [
    CREATE TRIGGER summary_delete AFTER DELETE ON summaries BEGIN UPDATE recording_fts SET summary='' WHERE recording_id=old.recording_id; END;`,
   `CREATE TABLE chatgpt_profiles (id TEXT PRIMARY KEY, label TEXT NOT NULL, client_id TEXT NOT NULL UNIQUE, issuer TEXT NOT NULL, subject TEXT NOT NULL, email TEXT, name TEXT, ciphertext BLOB, models TEXT NOT NULL DEFAULT '[]', welcome_seen INTEGER NOT NULL DEFAULT 0, blocked_reason TEXT, logout_warning TEXT, created_at TEXT NOT NULL);`,
   `ALTER TABLE transcription_jobs ADD COLUMN summary_pending INTEGER NOT NULL DEFAULT 0;
-   UPDATE settings SET value=json_set(value, '$.transcription', json('{"provider":"local","model":"whisper-small"}')) WHERE key='ai' AND json_valid(value);`
+   UPDATE settings SET value=json_set(value, '$.transcription', json('{"provider":"local","model":"whisper-small"}')) WHERE key='ai' AND json_valid(value);`,
+  `ALTER TABLE actionables ADD COLUMN created_at TEXT;
+   ALTER TABLE actionables ADD COLUMN due_date TEXT;
+   ALTER TABLE actionables ADD COLUMN completed_at TEXT;
+   CREATE INDEX actionables_open_due ON actionables(done, due_date);`
 ]
 
 export function initializeDatabase(filePath: string): void {
@@ -127,5 +132,8 @@ export function renameRecording(id: string, title: string): void {
   if (!run("UPDATE recordings SET title=?, title_source='manual' WHERE id=?", [name, id]).changes) throw new Error('Recording was not found.')
 }
 export function listProjects(): ProjectView[] { return queryAll('SELECT p.id, p.name, count(r.id) AS count FROM projects p LEFT JOIN recordings r ON r.project_id=p.id GROUP BY p.id ORDER BY p.name') }
+export function libraryNavigation(): LibraryNavigation {
+  return { projects: listProjects(), looseRecordings: queryAll("SELECT id, filename, title FROM recordings WHERE project_id IS NULL ORDER BY date_recorded DESC, id") }
+}
 export function createProject(name: string): ProjectView { const id = randomUUID(); run('INSERT INTO projects VALUES (?, ?, ?)', [id, name, new Date().toISOString()]); return { id, name, count: 0 } }
-export function listActionables(): ActionableView[] { return queryAll<{ id: string; text: string; done: number; recordingId: string; start: number | null }>('SELECT id, text, done, recording_id AS recordingId, start FROM actionables ORDER BY done, rowid DESC').map(a => ({ ...a, done: a.done === 1 })) }
+export function listActionables(): ActionableView[] { return queryAll<Omit<ActionableView, 'done'> & { done: number }>('SELECT id, text, done, recording_id AS recordingId, start, created_at AS createdAt, due_date AS dueDate, completed_at AS completedAt FROM actionables ORDER BY done, due_date IS NULL, due_date, rowid DESC').map(a => ({ ...a, done: a.done === 1 })) }

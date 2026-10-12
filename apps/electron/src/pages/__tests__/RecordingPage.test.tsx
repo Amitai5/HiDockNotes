@@ -25,6 +25,7 @@ describe('recording processing results in the Library', () => {
     await screen.findByText('I will send the plan.')
     expect(screen.getByText('Dana will send the plan.')).toBeInTheDocument()
     expect(screen.getByText('Send the plan')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Summary' }).compareDocumentPosition(screen.getByRole('heading', { name: 'Transcript' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
   it('shows a failed summary reason while preserving the transcript and offering retry', async () => {
     detail.recording.status = 'failed'; detail.processing = { ...detail.processing!, stage: 'failed', message: 'Processing stopped.', error: 'Quota reached.' }

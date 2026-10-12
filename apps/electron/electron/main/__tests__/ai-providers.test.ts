@@ -6,6 +6,7 @@ import { GeminiProvider } from '../ai/gemini-provider'
 import { parseGeminiTranscript, parseOpenAITranscript, parseSummary } from '../ai/provider-parsing'
 import { providerError } from '../ai/errors'
 import { DEFAULT_AI_SETTINGS } from '../../../src/shared/ai'
+import { summaryInstructions, SUMMARY_SCHEMA } from '../ai/providers'
 
 vi.mock('node:fs', async () => { const { Readable } = await import('node:stream'); return { ...(await vi.importActual<typeof import('node:fs')>('node:fs')), createReadStream: vi.fn(() => Readable.from(Buffer.from('synthetic audio'))) } })
 
@@ -31,6 +32,16 @@ describe('provider timestamp contracts', () => {
     expect(error.message).not.toContain('AQ.')
     expect(error.retryable).toBe(true)
     expect(providerError({ status: 401 }).retryable).toBe(false)
+  })
+  it('accepts explicit deadlines, preserves missing legacy deadlines, and rejects impossible dates', () => {
+    const summary = (dueDate: unknown) => JSON.stringify({ title: 'Plan', summary: 'A plan.', actionItems: [{ text: 'Send plan', start: 1, dueDate }] })
+    expect(parseSummary(summary('2026-10-12'), 2).actionItems[0].dueDate).toBe('2026-10-12')
+    expect(parseSummary(summary(null), 2).actionItems[0].dueDate).toBeNull()
+    expect(() => parseSummary(summary('2026-02-30'), 2)).toThrow('due date')
+    expect(() => parseSummary(summary('tomorrow'), 2)).toThrow('due date')
+    expect(SUMMARY_SCHEMA.properties.actionItems.items.required).toContain('dueDate')
+    expect(summaryInstructions(DEFAULT_AI_SETTINGS, { recordedAt: '2026-10-08T12:00:00Z' })).toContain('2026-10-08')
+    expect(summaryInstructions(DEFAULT_AI_SETTINGS)).toContain('Do not resolve relative or incomplete dates')
   })
   it('requests Whisper word timing and explicit diarized segment timing', async () => {
     const create = vi.fn().mockResolvedValue({ text: 'Hello', words: [{ word: 'Hello', start: 0, end: 1 }], segments: [{ text: 'Hello', start: 0, end: 1 }] })

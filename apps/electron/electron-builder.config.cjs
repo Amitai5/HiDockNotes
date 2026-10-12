@@ -4,7 +4,7 @@ module.exports = {
   productName: product.name,
   directories: { output: `../../release/${product.version}` },
   files: ['out/**/*', 'package.json'],
-  extraResources: [{ from: '../../LICENSE', to: 'LICENSE' }, { from: '../../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' }, { from: 'resources/icon.png', to: 'icon.png' }],
+  extraResources: [{ from: '../../LICENSE', to: 'LICENSE' }, { from: '../../THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' }, { from: 'resources/icon.png', to: 'icon.png' }, { from: 'out/main/mcp-launcher.js', to: 'mcp-launcher.cjs' }],
   // SQLite and node-usb ship N-API binaries; use the verified installed binaries.
   npmRebuild: false,
   asarUnpack: ['**/*.node', '**/usb/**', '**/ffmpeg-static/**', '**/sherpa-onnx-*/**'],

@@ -4,7 +4,7 @@ import { DEFAULT_MODELS, type AISettings, type ModelChoice } from '../../../src/
 import type { TranscriptSegment } from '../../../src/shared/contracts'
 import { providerError, ProcessingError } from './errors'
 import { parseOpenAITranscript, parseSummary } from './provider-parsing'
-import { SUMMARY_SCHEMA, summaryInstructions, transcriptContent, type AudioChunk, type ProviderClient, type SummaryResult, type TranscriptionResult } from './providers'
+import { SUMMARY_SCHEMA, summaryInstructions, transcriptContent, type AudioChunk, type ProviderClient, type SummaryContext, type SummaryResult, type TranscriptionResult } from './providers'
 
 export class OpenAIProvider implements ProviderClient {
   private readonly client: OpenAI
@@ -33,9 +33,9 @@ export class OpenAIProvider implements ProviderClient {
     } catch (error) { if (error instanceof ProcessingError) throw error; throw providerError(error) }
     finally { file.destroy() }
   }
-  async summarize(model: string, segments: TranscriptSegment[], settings: AISettings, signal?: AbortSignal): Promise<SummaryResult> {
+  async summarize(model: string, segments: TranscriptSegment[], settings: AISettings, signal?: AbortSignal, context?: SummaryContext): Promise<SummaryResult> {
     try {
-      const response = await this.client.responses.create({ model, store: false, instructions: summaryInstructions(settings), input: transcriptContent(segments), text: { format: { type: 'json_schema', name: 'recording_summary', strict: true, schema: SUMMARY_SCHEMA } }, max_output_tokens: 6000 }, { signal })
+      const response = await this.client.responses.create({ model, store: false, instructions: summaryInstructions(settings, context), input: transcriptContent(segments), text: { format: { type: 'json_schema', name: 'recording_summary', strict: true, schema: SUMMARY_SCHEMA } }, max_output_tokens: 6000 }, { signal })
       return parseSummary(response.output_text, Math.max(0, ...segments.map(s => s.end)))
     } catch (error) { if (error instanceof ProcessingError) throw error; throw providerError(error) }
   }

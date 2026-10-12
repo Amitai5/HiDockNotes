@@ -3,7 +3,7 @@ import { DEFAULT_MODELS, type AISettings, type ModelChoice } from '../../../src/
 import type { TranscriptSegment } from '../../../src/shared/contracts'
 import { ProcessingError, providerError } from './errors'
 import { parseGeminiTranscript, parseSummary } from './provider-parsing'
-import { SUMMARY_SCHEMA, summaryInstructions, transcriptContent, type AudioChunk, type ProviderClient, type SummaryResult, type TranscriptionResult } from './providers'
+import { SUMMARY_SCHEMA, summaryInstructions, transcriptContent, type AudioChunk, type ProviderClient, type SummaryContext, type SummaryResult, type TranscriptionResult } from './providers'
 
 export class GeminiProvider implements ProviderClient {
   private readonly client: GoogleGenAI
@@ -51,9 +51,9 @@ export class GeminiProvider implements ProviderClient {
     } catch (error) { if (error instanceof ProcessingError) throw error; throw providerError(error) }
     finally { if (name) await this.client.files.delete({ name }).catch(() => undefined) }
   }
-  async summarize(model: string, segments: TranscriptSegment[], settings: AISettings, signal?: AbortSignal): Promise<SummaryResult> {
+  async summarize(model: string, segments: TranscriptSegment[], settings: AISettings, signal?: AbortSignal, context?: SummaryContext): Promise<SummaryResult> {
     try {
-      const response = await this.client.models.generateContent({ model, contents: transcriptContent(segments), config: { systemInstruction: summaryInstructions(settings), responseMimeType: 'application/json', responseJsonSchema: SUMMARY_SCHEMA, maxOutputTokens: 6000, abortSignal: signal } })
+      const response = await this.client.models.generateContent({ model, contents: transcriptContent(segments), config: { systemInstruction: summaryInstructions(settings, context), responseMimeType: 'application/json', responseJsonSchema: SUMMARY_SCHEMA, maxOutputTokens: 6000, abortSignal: signal } })
       return parseSummary(response.text ?? '', Math.max(0, ...segments.map(s => s.end)))
     } catch (error) { if (error instanceof ProcessingError) throw error; throw providerError(error) }
   }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AISettings } from '../../../src/shared/ai'
-import { queryOne, run, runInTransaction, type Recording } from '../services/database'
+import { queryAll, queryOne, run, runInTransaction, type Recording } from '../services/database'
 import { embeddingBytes } from './voice-matching'
 import { transcriptContent } from './providers'
 import type { ProcessingResult, TranscriptCheckpoint } from './backend'
@@ -27,8 +27,18 @@ export function saveProcessingResult(id: string, result: ProcessingResult, setti
       const recording = queryOne<Recording & { title_source: string | null }>('SELECT * FROM recordings WHERE id=?', [id])
       if (recording && (!recording.title || recording.title_source === 'ai')) run("UPDATE recordings SET title=?, title_source='ai' WHERE id=?", [result.summary.title, id])
       run('INSERT INTO summaries(id, recording_id, text, template) VALUES (?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET text=excluded.text, template=excluded.template', [randomUUID(), id, result.summary.summary, settings.summaryTemplate])
-      run('DELETE FROM actionables WHERE recording_id=?', [id])
-      for (const item of result.summary.actionItems) run('INSERT INTO actionables(id, recording_id, text, start) VALUES (?, ?, ?, ?)', [randomUUID(), id, item.text, item.start])
+      const previous = queryAll<{ id: string; text: string; done: number; due_date: string | null }>('SELECT id, text, done, due_date FROM actionables WHERE recording_id=?', [id])
+      const retained = new Set<string>()
+      const createdAt = new Date().toISOString()
+      for (const item of result.summary.actionItems) {
+        const existing = previous.find(value => !retained.has(value.id) && value.text.trim().toLocaleLowerCase() === item.text.trim().toLocaleLowerCase())
+        if (existing) {
+          retained.add(existing.id)
+          // Regenerating a summary must not undo completion or edited deadlines.
+          run('UPDATE actionables SET start=? WHERE id=?', [item.start, existing.id])
+        } else run('INSERT INTO actionables(id, recording_id, text, start, created_at, due_date) VALUES (?, ?, ?, ?, ?, ?)', [randomUUID(), id, item.text, item.start, createdAt, item.dueDate ?? null])
+      }
+      for (const item of previous) if (!retained.has(item.id) && !item.done && item.due_date === null) run('DELETE FROM actionables WHERE id=?', [item.id])
     }
     const stage = result.empty ? 'empty' : 'done'
     run('UPDATE recordings SET status=? WHERE id=?', [stage, id])

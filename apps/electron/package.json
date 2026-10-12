@@ -1,6 +1,6 @@
 {
   "name": "hidocknotes-app",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A private recording library for HiDock devices.",
   "main": "out/main/index.js",
   "license": "MIT",
@@ -26,7 +26,9 @@
     "openai": "7.30.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "react-markdown": "10.1.0",
     "react-router-dom": "^7.18.2",
+    "remark-gfm": "4.0.1",
     "sherpa-onnx-node": "1.13.8",
     "usb": "2.17.0",
     "zustand": "^5.0.1"

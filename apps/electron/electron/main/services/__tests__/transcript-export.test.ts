@@ -14,4 +14,11 @@ describe('transcript exports', () => {
     expect(exportTranscript(detail, 'vtt')).toContain('WEBVTT\n\n00:00:01.250 --> 00:00:02.500')
     expect(subtitleTime(59.9996)).toBe('00:01:00,000')
   })
+  it('exports just the summary when the transcript is excluded', () => {
+    const output = exportTranscript(detail, 'md', 'summary')
+    expect(output).toContain('## Summary')
+    expect(output).not.toContain('## Action items')
+    expect(output).not.toContain('## Transcript')
+    expect(output).not.toContain('Dana: Send the plan.')
+  })
 })

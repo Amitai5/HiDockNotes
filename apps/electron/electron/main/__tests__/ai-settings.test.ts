@@ -13,7 +13,7 @@ describe('AI settings and encrypted credentials', () => {
     expect(readAISettings()).toMatchObject({ transcription: { provider: 'openai', model: 'whisper-1' }, chat: DEFAULT_AI_SETTINGS.chat })
   })
   it('defaults to local Whisper and rejects using it as a chat model', () => {
-    expect(readAISettings().transcription).toEqual({ provider: 'local', model: 'whisper-small' })
+    expect(readAISettings().transcription).toEqual({ provider: 'local', model: 'whisper-base' })
     expect(() => validateAISettings({ chat: { provider: 'local', model: 'whisper-small' } })).toThrow('for transcription')
     expect(() => validateAISettings({ transcription: { provider: 'local', model: 'custom-model' } })).toThrow('timestamps')
   })

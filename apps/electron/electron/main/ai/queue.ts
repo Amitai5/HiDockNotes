@@ -36,10 +36,14 @@ export class TranscriptionQueue {
     return { waiting: queryOne<{ count: number }>("SELECT count(*) AS count FROM transcription_jobs WHERE stage='queued'")?.count ?? 0, active: active ? { ...active, startedAt: this.startedAt } : null }
   }
   start(): void {
+    const settings = this.dependencies.settings()
+    const recovered = settings.autoTranscribe && settings.transcription.provider === 'local' ? queryAll<{ id: string }>("SELECT r.id FROM recordings r JOIN transcription_jobs j ON j.recording_id=r.id WHERE j.stage='failed' AND j.error='Local Whisper returned invalid segment timestamps. Retry the recording.' AND r.verified=1 AND r.file_path IS NOT NULL AND r.checksum IS NOT NULL") : []
     runInTransaction(() => {
+      for (const recording of recovered) run("UPDATE transcription_jobs SET stage='queued', progress=0, attempt=0, next_attempt_at=NULL, error=NULL, message='Resuming with the local Whisper timestamp fix…' WHERE recording_id=?", [recording.id])
       run("UPDATE transcription_jobs SET stage='queued', progress=0, message='Resuming after restart…', attempt=MAX(0,attempt-1) WHERE stage NOT IN ('queued','done','empty','failed')")
       run("UPDATE recordings SET status='queued' WHERE id IN (SELECT recording_id FROM transcription_jobs WHERE stage='queued')")
     })
+    if (recovered.length) { this.dependencies.activity('info', `Resuming ${recovered.length} recording${recovered.length === 1 ? '' : 's'} affected by the local Whisper timestamp issue.`); this.dependencies.changed() }
     this.enqueuePending()
     this.kick()
   }
@@ -103,7 +107,7 @@ export class TranscriptionQueue {
       this.activeChatGPTProfile = chatgptProfileId
       const keys: ProcessingInput['keys'] = { gemini: null, openai: null }
       for (const provider of new Set([...(settings.transcription.provider === 'local' ? [] : [settings.transcription.provider]), ...(!summaryReady || settings.chat.provider === 'chatgpt' ? [] : [settings.chat.provider])])) keys[provider] = this.dependencies.vault.read(provider)
-      const input: ProcessingInput = { id: recording.id, path: recording.file_path, checksum: recording.checksum, dataPath: this.dependencies.dataPath, settings, keys, profiles: voiceCandidates(), chatgptProfileId, summaryReady }
+      const input: ProcessingInput = { id: recording.id, path: recording.file_path, checksum: recording.checksum, dataPath: this.dependencies.dataPath, settings, keys, profiles: voiceCandidates(), chatgptProfileId, summaryReady, recordedAt: recording.date_recorded }
       const result = await this.dependencies.runner.run(input, {
         stage: (stage, progress, message) => {
           if (this.stopped) return

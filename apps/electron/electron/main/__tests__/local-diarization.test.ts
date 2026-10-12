@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { diarizeAudio, mergeDiarizationWindows, type DiarizationWindow } from '../ai/local-diarization'
+import { diarizeAudio, isDiarizedAudio, mergeDiarizationWindows, type DiarizationWindow, type DiarizedAudio } from '../ai/local-diarization'
 
 const native = vi.hoisted(() => ({ readWave: vi.fn(), construct: vi.fn(), process: vi.fn(), compute: vi.fn() }))
 vi.mock('sherpa-onnx-node', () => ({ default: {
@@ -57,5 +57,30 @@ describe('bounded local speaker detection', () => {
     first.plan.keepEnd = 120; first.audio.turns = [{ start: 118, end: 122, speaker: 0 }]
     second.plan.keepStart = 120; second.audio.turns = [{ start: 0, end: 20, speaker: 0 }]
     expect(mergeDiarizationWindows([first, second], 130).turns).toEqual([{ start: 118, end: 120, speaker: 0 }, { start: 120, end: 130, speaker: 0 }])
+  })
+  it('resumes completed speaker sections after cancellation while preserving global voice matching', async () => {
+    const saved = new Map<number, DiarizedAudio>(), controller = new AbortController()
+    const checkpoints = { activityIntervals: [{ start: 0, end: 250 }], read: vi.fn(async (index: number) => saved.get(index) ?? null), write: vi.fn(async (index: number, audio: DiarizedAudio) => { saved.set(index, audio) }) }
+    await expect(diarizeAudio('/audio.wav', { segmentation: '/seg', embedding: '/embed' }, controller.signal, fraction => { if (fraction > 0) controller.abort() }, checkpoints)).rejects.toThrow()
+    expect(saved.size).toBe(1)
+    const progress = vi.fn()
+    const result = await diarizeAudio('/audio.wav', { segmentation: '/seg', embedding: '/embed' }, undefined, progress, checkpoints)
+    expect(native.process).toHaveBeenCalledTimes(3)
+    expect(result.embeddings).toHaveLength(1)
+    expect(result.turns.map(turn => turn.start)).toEqual([1, 120, 240])
+    expect(progress).toHaveBeenCalledWith(expect.any(Number), 'Resumed saved speaker section 1 of 3.')
+  })
+  it('skips fully silent speaker sections without loading extra models', async () => {
+    const checkpoints = { activityIntervals: [{ start: 248, end: 250 }], read: vi.fn(async () => null), write: vi.fn() }
+    await diarizeAudio('/audio.wav', { segmentation: '/seg', embedding: '/embed' }, undefined, vi.fn(), checkpoints)
+    expect(native.process).toHaveBeenCalledOnce()
+    expect(checkpoints.write).toHaveBeenCalledTimes(1)
+  })
+  it('refuses corrupted cached speaker boundaries and embeddings', () => {
+    const audio = { duration: 10, turns: [{ start: 0, end: 2, speaker: 0 }], embeddings: [{ speaker: 0, vector: [1, 0] }] }
+    expect(isDiarizedAudio(audio, 10)).toBe(true)
+    expect(isDiarizedAudio(audio, 20)).toBe(false)
+    expect(isDiarizedAudio({ ...audio, turns: [{ start: 0, end: 11, speaker: 0 }] }, 10)).toBe(false)
+    expect(isDiarizedAudio({ ...audio, embeddings: [{ speaker: 0, vector: [NaN, 0] }] }, 10)).toBe(false)
   })
 })

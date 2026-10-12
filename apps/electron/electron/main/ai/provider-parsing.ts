@@ -1,5 +1,6 @@
 import { ProcessingError } from './errors'
 import type { SummaryResult, TimedText, TranscriptionResult } from './providers'
+import { isDateOnly } from '../../../src/shared/actionables'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function timed(start: unknown, end: unknown, text: unknown, duration: number): TimedText | null {
@@ -48,7 +49,8 @@ export function parseSummary(text: string, duration: number): SummaryResult {
   const actionItems = item.actionItems.map(a => {
     const action = record(a)
     if (typeof action.text !== 'string' || !action.text.trim() || action.text.length > 2000 || (action.start !== null && (typeof action.start !== 'number' || !Number.isFinite(action.start) || action.start < 0 || action.start > duration))) throw new ProcessingError('The summary contained an invalid action item or timestamp. Retry to generate it again.', true)
-    return { text: action.text.trim(), start: action.start as number | null }
+    if (action.dueDate !== undefined && action.dueDate !== null && !isDateOnly(action.dueDate)) throw new ProcessingError('The summary contained an invalid due date. Retry to generate it again.', true)
+    return { text: action.text.trim(), start: action.start as number | null, ...(action.dueDate === undefined ? {} : { dueDate: action.dueDate as string | null }) }
   })
   return { title: item.title.trim().slice(0, 200), summary: item.summary.trim(), actionItems }
 }
