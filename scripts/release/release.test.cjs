@@ -5,7 +5,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
 const { assertVersion, validateManifests, setVersion } = require('./version.cjs')
-const { githubClient, tagCommit } = require('./github.cjs')
+const { githubClient, tagCommit, findRelease } = require('./github.cjs')
 const { releasePlan } = require('./prepare.cjs')
 const { expectedArtifacts, verifyArtifacts } = require('./artifacts.cjs')
 const { verifyUploadedAssets } = require('./publish.cjs')
@@ -65,6 +65,29 @@ test('GitHub GET 404 means missing but failed mutations remain errors', async ()
 test('requires a repository and token before using GitHub', () => {
   assert.throws(() => githubClient({ GITHUB_REPOSITORY: 'owner/repo' }), /required/)
   assert.throws(() => githubClient({ GH_TOKEN: 'test-token', GITHUB_REPOSITORY: '../bad' }), /required/)
+})
+
+test('finds an unpublished draft even when the by-tag endpoint returns 404', async () => {
+  const draft = { id: 42, tag_name: 'v0.9.3', draft: true }
+  const api = async endpoint => endpoint.startsWith('releases/tags/') ? null : [draft]
+  assert.equal(await findRelease(api, 'v0.9.3'), draft)
+})
+
+test('searches subsequent release pages for an older unfinished draft', async () => {
+  const draft = { id: 42, tag_name: 'v0.9.3', draft: true }
+  const api = async endpoint => {
+    if (endpoint.startsWith('releases/tags/')) { return null }
+    if (endpoint.endsWith('page=1')) { return Array.from({ length: 100 }, (_, index) => ({ tag_name: `other-${index}` })) }
+    return [draft]
+  }
+  assert.equal(await findRelease(api, 'v0.9.3'), draft)
+})
+
+test('published release lookup does not list drafts and missing releases return null', async () => {
+  const published = { tag_name: 'v0.9.3', draft: false }
+  const api = async endpoint => { assert.ok(endpoint.startsWith('releases/tags/')); return published }
+  assert.equal(await findRelease(api, 'v0.9.3'), published)
+  assert.equal(await findRelease(async endpoint => endpoint.startsWith('releases/tags/') ? null : [], 'v0.9.3'), null)
 })
 
 test('resolves annotated version tags to their commit', async () => {

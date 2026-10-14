@@ -2,7 +2,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 const { root, readVersion } = require('./version.cjs')
-const { githubClient, tagCommit, git } = require('./github.cjs')
+const { githubClient, tagCommit, git, findRelease } = require('./github.cjs')
 const { verifyArtifacts, checksum } = require('./artifacts.cjs')
 
 function verifyUploadedAssets(assets, expected) {
@@ -21,7 +21,7 @@ async function main() {
   const commit = git('rev-parse', 'HEAD')
   if (commit !== process.env.RELEASE_COMMIT || !/^[0-9a-f]{40}$/.test(commit)) { throw new Error('Release source must match the validated build commit.') }
   const api = githubClient()
-  let release = await api(`releases/tags/${tag}`)
+  let release = await findRelease(api, tag)
   if (release && !release.draft) { console.log(`${tag} is already published.`); return }
   const directory = path.join(root, 'release', 'ci-assets')
   const installers = await verifyArtifacts(directory, version)
@@ -37,8 +37,7 @@ async function main() {
   const gh = (...args) => execFileSync('gh', [...args, '--repo', process.env.GITHUB_REPOSITORY], { stdio: 'inherit' })
   const prerelease = version.includes('-')
   if (!release) {
-    gh('release', 'create', tag, '--verify-tag', '--draft', '--title', `HiDockNotes ${version}`, '--notes-file', notes, '--generate-notes', ...(prerelease ? ['--prerelease'] : []))
-    release = await api(`releases/tags/${tag}`)
+    release = await api('releases', 'POST', { tag_name: tag, target_commitish: commit, name: `HiDockNotes ${version}`, body: fs.readFileSync(notes, 'utf8'), generate_release_notes: true, draft: true, prerelease })
   }
   if (!release?.draft) { throw new Error('Expected an unpublished release draft.') }
   gh('release', 'upload', tag, ...expected.map(file => path.join(directory, file.name)), '--clobber')

@@ -34,4 +34,17 @@ function git(...args) {
   return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 }
 
-module.exports = { githubClient, tagCommit, git }
+async function findRelease(api, tag) {
+  const published = await api(`releases/tags/${encodeURIComponent(tag)}`)
+  if (published) { return published }
+  // The by-tag endpoint excludes drafts; list releases to resume an interrupted upload.
+  for (let page = 1; ; page++) {
+    const releases = await api(`releases?per_page=100&page=${page}`)
+    if (!Array.isArray(releases)) { throw new Error('GitHub did not return the release list.') }
+    const draft = releases.find(release => release.tag_name === tag)
+    if (draft) { return draft }
+    if (releases.length < 100) { return null }
+  }
+}
+
+module.exports = { githubClient, tagCommit, git, findRelease }
