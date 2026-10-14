@@ -12,6 +12,6 @@ module.exports = {
   nsis: { oneClick: false, allowToChangeInstallationDirectory: true, createDesktopShortcut: true, installerIcon: 'resources/icon.ico', uninstallerIcon: 'resources/icon.ico' },
   // Build on the Mac's own architecture so ffmpeg-static matches the target.
   mac: { icon: 'resources/icon.icns', target: ['dmg'], category: 'public.app-category.productivity', artifactName: 'HiDockNotes-${version}-macos-${arch}.${ext}', identity: '-', hardenedRuntime: false, notarize: false },
-  linux: { icon: 'resources/icon.png', target: [{ target: 'AppImage', arch: ['x64'] }, { target: 'deb', arch: ['x64'] }], category: 'Utility', artifactName: 'HiDockNotes-${version}-linux-${arch}.${ext}', maintainer: 'HiDockNotes contributors <Amitai5@users.noreply.github.com>' },
+  linux: { icon: 'resources/icon.png', target: [{ target: 'AppImage', arch: ['x64'] }, { target: 'deb', arch: ['x64'] }], category: 'Utility', artifactName: 'HiDockNotes-${version}-linux-x64.${ext}', maintainer: 'HiDockNotes contributors <Amitai5@users.noreply.github.com>' },
   publish: null
 }

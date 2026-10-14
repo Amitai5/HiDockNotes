@@ -12,9 +12,9 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
-    "package:win": "electron-builder --config electron-builder.config.cjs --win nsis --x64",
-    "package:mac": "electron-builder --config electron-builder.config.cjs --mac dmg",
-    "package:linux": "electron-builder --config electron-builder.config.cjs --linux AppImage deb --x64"
+    "package:win": "electron-builder --config electron-builder.config.cjs --win nsis --x64 --publish never",
+    "package:mac": "electron-builder --config electron-builder.config.cjs --mac dmg --publish never",
+    "package:linux": "electron-builder --config electron-builder.config.cjs --linux AppImage deb --x64 --publish never"
   },
   "dependencies": {
     "@google/genai": "2.28.0",
