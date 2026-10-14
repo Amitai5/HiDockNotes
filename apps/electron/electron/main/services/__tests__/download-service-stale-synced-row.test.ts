@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { join } from 'node:path'
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => '/tmp') },
@@ -30,6 +31,8 @@ vi.mock('electron', () => ({
 const syncedRows = new Map<string, { original_filename: string; local_filename: string; file_path: string }>()
 /** Absolute paths the fake filesystem reports as present. */
 const filesOnDisk = new Set<string>()
+const oldDirectory = '/mock/Old-Location'
+const externalDirectory = '/mock/External-Drive/HiDock-Next-Audios'
 
 const mockAddSyncedFile = vi.fn((original: string, local: string, path: string) => {
   syncedRows.set(original, { original_filename: original, local_filename: local, file_path: path })
@@ -85,11 +88,11 @@ describe('DownloadService — a synced_files row never outranks the disk', () =>
       syncedRows.set('D022a-Rec01.hda', {
         original_filename: 'D022a-Rec01.hda',
         local_filename: 'D022a-Rec01.wav',
-        file_path: 'F:\\Old-Location\\D022a-Rec01.wav'
+        file_path: join(oldDirectory, 'D022a-Rec01.wav')
       })
       // The drive is mounted (the folder resolves); the audio is not there, and
       // not under any canonical variant either.
-      filesOnDisk.add('F:/Old-Location')
+      filesOnDisk.add(oldDirectory)
 
       const result = service.isFileAlreadySynced('D022a-Rec01.hda')
 
@@ -100,9 +103,9 @@ describe('DownloadService — a synced_files row never outranks the disk', () =>
       syncedRows.set('D022b-Rec02.hda', {
         original_filename: 'D022b-Rec02.hda',
         local_filename: 'D022b-Rec02.wav',
-        file_path: 'F:\\Old-Location\\D022b-Rec02.wav'
+        file_path: join(oldDirectory, 'D022b-Rec02.wav')
       })
-      filesOnDisk.add('F:/Old-Location') // drive mounted, file gone
+      filesOnDisk.add(oldDirectory) // drive mounted, file gone
 
       service.isFileAlreadySynced('D022b-Rec02.hda')
 
@@ -114,9 +117,9 @@ describe('DownloadService — a synced_files row never outranks the disk', () =>
       syncedRows.set('D022c-Rec03.hda', {
         original_filename: 'D022c-Rec03.hda',
         local_filename: 'D022c-Rec03.wav',
-        file_path: 'F:\\Old-Location\\D022c-Rec03.wav'
+        file_path: join(oldDirectory, 'D022c-Rec03.wav')
       })
-      filesOnDisk.add('F:/Old-Location') // drive mounted, file no longer there
+      filesOnDisk.add(oldDirectory) // drive mounted, file no longer there
       // The audio is in the CURRENT recordings directory, under the .wav variant.
       filesOnDisk.add('/mock/recordings/D022c-Rec03.wav')
 
@@ -136,9 +139,9 @@ describe('DownloadService — a synced_files row never outranks the disk', () =>
       syncedRows.set('D022g-Rec07.hda', {
         original_filename: 'D022g-Rec07.hda',
         local_filename: 'D022g-Rec07.wav',
-        file_path: 'F:/HiDock-Next-Audios/D022g-Rec07.wav'
+        file_path: join(externalDirectory, 'D022g-Rec07.wav')
       })
-      // Neither the file nor its directory is present — F: is gone.
+      // Neither the file nor its directory is present — the drive is gone.
 
       const result = service.isFileAlreadySynced('D022g-Rec07.hda')
 
@@ -151,10 +154,10 @@ describe('DownloadService — a synced_files row never outranks the disk', () =>
       syncedRows.set('D022h-Rec08.hda', {
         original_filename: 'D022h-Rec08.hda',
         local_filename: 'D022h-Rec08.wav',
-        file_path: 'F:/HiDock-Next-Audios/D022h-Rec08.wav'
+        file_path: join(externalDirectory, 'D022h-Rec08.wav')
       })
       // The drive is mounted — the directory resolves — but the file is not there.
-      filesOnDisk.add('F:/HiDock-Next-Audios')
+      filesOnDisk.add(externalDirectory)
 
       const result = service.isFileAlreadySynced('D022h-Rec08.hda')
 
@@ -182,9 +185,9 @@ describe('DownloadService — a synced_files row never outranks the disk', () =>
       syncedRows.set('D022e-Rec05.hda', {
         original_filename: 'D022e-Rec05.hda',
         local_filename: 'D022e-Rec05.wav',
-        file_path: 'F:\\Old-Location\\D022e-Rec05.wav'
+        file_path: join(oldDirectory, 'D022e-Rec05.wav')
       })
-      filesOnDisk.add('F:/Old-Location') // drive mounted, file gone
+      filesOnDisk.add(oldDirectory) // drive mounted, file gone
 
       const result = service.queueDownloads([{ filename: 'D022e-Rec05.hda', size: 1024 }], true)
 

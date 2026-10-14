@@ -75,12 +75,14 @@ vi.mock('../activity-log', () => ({
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
+  const mkdirSync = vi.fn()
   return {
     ...actual,
     // The sentinel backs a mocked synced_files row (D-022); everything else
     // stays under the test's own mockExistsSync control.
-    default: { ...actual, existsSync: (p: string) => String(p).startsWith('/mock/synced-on-disk/') || mockExistsSync(p) },
-    existsSync: (p: string) => String(p).startsWith('/mock/synced-on-disk/') || mockExistsSync(p)
+    default: { ...actual, mkdirSync, existsSync: (p: string) => String(p).startsWith('/mock/synced-on-disk/') || mockExistsSync(p) },
+    existsSync: (p: string) => String(p).startsWith('/mock/synced-on-disk/') || mockExistsSync(p),
+    mkdirSync
   }
 })
 
