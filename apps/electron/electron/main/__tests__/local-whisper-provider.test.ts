@@ -106,10 +106,11 @@ describe('offline local Whisper transcription', () => {
   })
   it('skips preflight-confirmed silent sections while retaining original speech positions', async () => {
     readWave.mockReturnValue({ sampleRate: 16000, samples: new Float32Array(960000) })
+    decodeAsync.mockResolvedValueOnce({ ...speech, segment_timestamps: [6] })
     const progress = vi.fn()
     const result = await provider().transcribe('whisper-base', { path: '/audio.wav', duration: 60, language: 'en', activityIntervals: [{ start: 55, end: 60 }], progress })
     expect(decodeAsync).toHaveBeenCalledOnce()
-    expect(result.segments[0].start).toBe(50)
+    expect(result.segments[0].start).toBe(55)
     expect(progress.mock.calls.some(([message]) => message.includes('Skipped silent section'))).toBe(true)
   })
   it('does not load the recognizer when all sections are confirmed silent', async () => {

@@ -173,6 +173,7 @@ export class DevicePipelineService extends EventEmitter {
   private connectHandler: ((event: { device: unknown }) => void) | null = null
   private disconnectHandler: ((event: { device: unknown }) => void) | null = null
   private action: Promise<unknown> | null = null
+  private polling: Promise<void> | null = null
   private activeRecording: string | null | undefined
 
   constructor(
@@ -249,6 +250,7 @@ export class DevicePipelineService extends EventEmitter {
     // INIT
     this.setPhase('initializing')
     const initOk = await this.initialize()
+    if (this.aborted()) return
     if (!initOk) {
       await this.handleInitFailure()
       return
@@ -299,26 +301,34 @@ export class DevicePipelineService extends EventEmitter {
     let anySucceeded = false
 
     const info = await this.safe(() => this.jensen.getDeviceInfo())
+    if (this.aborted()) return false
     if (info) anySucceeded = true
 
     const card = await this.safe(() => this.jensen.getCardInfo())
+    if (this.aborted()) return false
     if (card) anySucceeded = true
 
     const fileCount = await this.safe(() => this.jensen.getFileCount())
+    if (this.aborted()) return false
     if (fileCount) anySucceeded = true
 
     const settings = await this.safe(() => this.jensen.getSettings())
+    if (this.aborted()) return false
     if (settings) anySucceeded = true
 
     const timeResult = this.jensen.getTime ? await this.safe(() => this.jensen.getTime!()) : null
+    if (this.aborted()) return false
     if (timeResult) anySucceeded = true
     const battery = this.jensen.getBatteryStatus ? await this.safe(() => this.jensen.getBatteryStatus!()) : null
+    if (this.aborted()) return false
     const recording = this.jensen.getRecordingFile ? await this.safe(() => this.jensen.getRecordingFile!()) : null
     this.activeRecording = this.jensen.getRecordingFile ? recording?.recording : null
 
     if (!anySucceeded) return false
 
     const recordingCount = fileCount?.count ?? this.state.device?.recordingCount ?? 0
+
+    if (this.aborted() || !this.jensen.isConnected()) return false
 
     this.patchState({
       device: {
@@ -344,8 +354,8 @@ export class DevicePipelineService extends EventEmitter {
   }
 
   /**
-   * Total init failure: USB reset → reconnect → retry the pipeline ONCE. If it
-   * still fails, disconnect cleanly and surface an error (spec §"Init failure").
+   * Total init failure drains and disconnects cleanly, then asks for reconnect.
+   * Physical disconnect/cancellation is handled before this failure path.
    */
   private async handleInitFailure(): Promise<void> {
     // Never reset firmware to recover an init failure. The injected adapter
@@ -496,7 +506,6 @@ export class DevicePipelineService extends EventEmitter {
         this.abortController?.signal
       )
     )
-
     if (!ok) {
       this.downloadService.markFailed?.(file.filename, 'Download failed or interrupted. Retry to fetch the complete file.')
       return { success: false, error: 'Download failed or aborted' }
@@ -567,6 +576,7 @@ export class DevicePipelineService extends EventEmitter {
         'device connect'
       )
     )
+    if (this.aborted()) return false
     if (!ok) {
       this.abortController?.abort()
       this.setError(
@@ -575,7 +585,7 @@ export class DevicePipelineService extends EventEmitter {
       return false
     }
     await this.runPipeline()
-    return true
+    return !this.aborted() && this.state.phase === 'idle'
   }
 
   async disconnect(): Promise<void> {
@@ -607,7 +617,8 @@ export class DevicePipelineService extends EventEmitter {
     if (this.action || this.state.phase !== 'idle' || !this.jensen.isConnected()) return
     const action = this.pollInternal()
     this.action = action
-    try { await action } finally { if (this.action === action) this.action = null }
+    this.polling = action
+    try { await action } finally { if (this.action === action) this.action = null; if (this.polling === action) this.polling = null }
   }
 
   private async pollInternal(): Promise<void> {
@@ -634,9 +645,19 @@ export class DevicePipelineService extends EventEmitter {
   }
 
   async deleteFile(filename: string): Promise<{ result: string } | null> {
-    if (this.action) throw new Error('Wait for the current operation to finish.')
-    if (!this.opts.canDelete || !await this.opts.canDelete(filename)) throw new Error('A verified local copy is required before deleting from the device.')
-    return this.safe(() => this.jensen.deleteFile(filename))
+    const preceding = this.action
+    if (preceding && preceding !== this.polling) throw new Error('Wait for the current operation to finish.')
+    let result: { result: string } | null = null
+    // A passive status poll must finish first. Reserve its successor slot now
+    // so another poll cannot race this user's confirmed deletion.
+    const action = Promise.resolve(preceding).then(async () => {
+      if (!this.jensen.isConnected() || this.state.phase !== 'idle') throw new Error('Connect the recorder and wait for its current operation to finish.')
+      if (!this.opts.canDelete || !await this.opts.canDelete(filename)) throw new Error('A verified local copy is required before deleting from the device.')
+      result = await this.safe(() => this.jensen.deleteFile(filename))
+      if (result?.result === 'success') { this.cachedFiles = this.cachedFiles?.filter(file => file.name !== filename) ?? null; this.emit('files', this.cachedFiles ?? []); this.cachedFileCount = -1 }
+    })
+    this.action = action
+    try { await action; return result } finally { if (this.action === action) this.action = null }
   }
 
   async downloadSelected(filenames: string[]): Promise<void> {

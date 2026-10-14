@@ -30,6 +30,13 @@ import { LibraryAgentTools } from './agents/library-tools'
 import { agentSetup } from './agents/setup'
 import { queryOne, queryAll, run } from './services/database'
 import { registerAgentHandlers } from './ipc/agent-handlers'
+import { RecordingDeletionService } from './services/recording-deletion'
+import { waitForPlayback } from './services/audio-playback'
+import { registerRecordingControls } from './ipc/recording-handlers'
+import { repairFragmentedSpeakers } from './ai/speaker-repair'
+import { repairSavedDecoderArtifacts } from './ai/transcript-repair'
+import { registerBackupHandlers } from './ipc/backup-handlers'
+import type { LibraryBackupService } from './services/library-backup'
 
 app.setName(product.name)
 app.setAppUserModelId(product.appId)
@@ -40,6 +47,8 @@ let cleaned = false
 let transcriptionQueue: TranscriptionQueue | undefined
 let chatgptAuth: ChatGPTAuth | undefined
 let agentAccess: AgentAccessController | undefined
+let recordingDeletion: RecordingDeletionService | undefined
+let libraryBackup: LibraryBackupService | undefined
 const ownsInstance = app.requestSingleInstanceLock()
 if (!ownsInstance) app.quit()
 app.on('second-instance', () => {
@@ -50,6 +59,10 @@ app.on('second-instance', () => {
 
 async function createWindow(): Promise<void> {
   initializeDatabase(join(app.getPath('userData'), 'data', 'library.db'))
+  const artifacts = await repairSavedDecoderArtifacts(app.getPath('userData')).catch(() => { emitActivityLog('warning', 'Saved transcript cleanup was skipped because its safety backup could not be created. Check free disk space.'); return { recordings: 0, segments: 0 } })
+  if (artifacts.segments) emitActivityLog('info', `Removed ${artifacts.segments} decoder artifacts from ${artifacts.recordings} saved local transcripts. The original rows and a database backup were retained.`)
+  const repaired = repairFragmentedSpeakers()
+  if (repaired) emitActivityLog('info', `Repaired fragmented speaker labels in ${repaired} recording${repaired === 1 ? '' : 's'}. Transcript words and timestamps were preserved.`)
   configureSettingsReader(readSettings)
   await initializeFileStorage()
   Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null)
@@ -61,6 +74,7 @@ async function createWindow(): Promise<void> {
   if (process.platform === 'darwin') app.dock?.setIcon(app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(__dirname, '../../resources/icon.png'))
   setIpcOwner(window)
   registerAppHandlers(window)
+  libraryBackup = registerBackupHandlers(window)
   const encryption = { isAvailable: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'), encrypt: (value: string) => safeStorage.encryptString(value), decrypt: (value: Buffer) => safeStorage.decryptString(value) }
   const vault = new CredentialVault(encryption)
   const agentTools = new LibraryAgentTools({ all: queryAll, one: queryOne })
@@ -84,7 +98,9 @@ async function createWindow(): Promise<void> {
     const profileId = chatgpt.state().activeProfileId
     return providerFactory(() => chatgpt.accessToken(profileId), message => { if (profileId) chatgpt.block(profileId, message) }, () => chatgpt.sessionSignal(profileId))(provider)
   }
-  transcriptionQueue = new TranscriptionQueue({ vault, settings: readAISettings, dataPath: app.getPath('userData'), runner: new UtilityProcessingRunner(profileId => chatgpt.accessToken(profileId)), changed: libraryChanged, activity: emitActivityLog, chatgpt })
+  transcriptionQueue = new TranscriptionQueue({ vault, reviewMode: process.argv.includes('--review-library'), settings: readAISettings, dataPath: app.getPath('userData'), runner: new UtilityProcessingRunner(profileId => chatgpt.accessToken(profileId)), changed: libraryChanged, activity: emitActivityLog, chatgpt })
+  recordingDeletion = new RecordingDeletionService({ dataPath: app.getPath('userData'), device: getDevicePipelineService(), pause: (id, operation) => transcriptionQueue!.withRecordingPaused(id, operation), waitPlayback: waitForPlayback, dismissDownload: filename => { getDownloadService().dismissTerminal(filename) }, changed: libraryChanged })
+  registerRecordingControls(recordingDeletion, libraryChanged)
   registerAIHandlers(transcriptionQueue, vault, providers, libraryChanged, chatgpt, url => shell.openExternal(url))
   recordingEvents.on('verified', id => transcriptionQueue?.enqueue(id))
   registerDevicePipelineHandlers()
@@ -127,7 +143,7 @@ app.on('before-quit', event => {
   const pipeline = getDevicePipelineService()
   pipeline.removeAutoConnect()
   recordingEvents.removeAllListeners('verified')
-  void Promise.allSettled([pipeline.disconnect(), transcriptionQueue?.stop(), agentAccess?.close()]).then(() => {
+  void Promise.allSettled([pipeline.disconnect(), transcriptionQueue?.stop(), agentAccess?.close(), recordingDeletion?.drain(), libraryBackup?.stop()]).then(() => {
     getDownloadService().destroy()
     closeDatabase()
     cleaned = true

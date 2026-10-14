@@ -3,7 +3,8 @@ import { readFile, stat } from 'node:fs/promises'
 import { join, basename, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import product from '../../../product.json'
-import { getSettings, saveSettings, listRecordings, getDetail, listProjects, createProject, listActionables, run, markRecordingDownloaded, remeasureRecordingDuration, getRecordingByFilename, renameRecording } from '../services/database'
+import { getSettings, saveSettings, listRecordings, getDetail, listProjects, createProject, listActionables, markRecordingDownloaded, remeasureRecordingDuration, getRecordingByFilename, renameRecording } from '../services/database'
+import { assignRecordingProject, setRecordingTags } from '../services/recording-metadata'
 import { recordingReady } from '../services/recording-events'
 import { getRecordingsPath, saveRecording } from '../services/file-storage'
 import { getDataPath } from '../services/config'
@@ -18,11 +19,13 @@ import { handle, listen } from './trusted-ipc'
 import { validateText, validateBoolean, validateId } from './jensen-validation'
 import { libraryNavigation } from '../services/database'
 import type { AppSettings } from '../../../src/shared/contracts'
+import { registerClipboardHandler } from './clipboard-handlers'
 
 export function readSettings(): AppSettings { return getSettings(join(getDataPath(), 'recordings')) }
 export function libraryChanged(): void { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('library:changed') }
 const changed = libraryChanged
 export function registerAppHandlers(window: BrowserWindow): void {
+  registerClipboardHandler()
   listen('window:minimize', () => window.minimize())
   listen('window:maximize', () => window.isMaximized() ? window.unmaximize() : window.maximize())
   listen('window:close', () => window.close())
@@ -55,6 +58,7 @@ export function registerAppHandlers(window: BrowserWindow): void {
   handle('library:detail', id => getDetail(validateId(id)))
   handle('library:navigation', libraryNavigation)
   handle('library:rename', (id, title) => { renameRecording(validateId(id), validateText(title, 200)); changed() })
+  handle('library:set-tags', (id, tags) => { setRecordingTags(validateId(id), tags); changed() })
   handle('library:waveform', id => readWaveform(validateId(id)))
   handle('library:import', async () => {
     const result = await dialog.showOpenDialog(window, { title: 'Import recordings', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'm4a', 'flac', 'ogg', 'hda'] }] })
@@ -95,7 +99,7 @@ export function registerAppHandlers(window: BrowserWindow): void {
   })
   handle('projects:list', listProjects)
   handle('projects:create', name => { const text = validateText(name, 80); if (!text) throw new Error('Give the project a name.'); const project = createProject(text); changed(); return project })
-  handle('projects:assign', (recording, project) => { run('UPDATE recordings SET project_id=? WHERE id=?', [project === null ? null : validateId(project), validateId(recording)]); changed() })
+  handle('projects:assign', (recording, project) => { assignRecordingProject(validateId(recording), project === null ? null : validateId(project)); changed() })
   handle('actionables:list', listActionables)
   handle('actionables:update', (id, value) => {
     updateActionable(validateId(id), value)

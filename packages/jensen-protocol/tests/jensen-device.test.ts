@@ -31,6 +31,15 @@ function makeFakeUsb(overrides: Partial<USB> = {}): USB {
   } as unknown as USB
 }
 
+describe('disconnect event origin', () => {
+  it('marks normal teardown as cleanup, including pre-connect cleanup with no device open', async () => {
+    const device = new JensenDevice(makeFakeUsb()), disconnected = vi.fn()
+    device.ondisconnect = disconnected
+    await device.disconnect()
+    expect(disconnected).toHaveBeenCalledWith('cleanup')
+  })
+})
+
 function makeResponsePacket(cmdId: number, sequence: number, body: Uint8Array): Uint8Array {
   const header = new Uint8Array(12)
   header[0] = 0x12

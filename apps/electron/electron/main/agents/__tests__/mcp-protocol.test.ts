@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { McpLineReader, ReadOnlyMcpServer } from '../mcp-protocol'
+import product from '../../../../product.json'
 
 async function initialize(server: ReadOnlyMcpServer, protocolVersion = '2025-11-25') {
   const value = await server.receive({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion, capabilities: {}, clientInfo: { name: 'Test client', version: '1.0' } } })
@@ -9,7 +10,7 @@ async function initialize(server: ReadOnlyMcpServer, protocolVersion = '2025-11-
 describe('read-only MCP protocol', () => {
   it.each(['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'])('negotiates supported protocol %s and declares only tool access', async version => {
     const server = new ReadOnlyMcpServer(vi.fn())
-    expect(await initialize(server, version)).toMatchObject({ id: 1, result: { protocolVersion: version, capabilities: { tools: {} }, serverInfo: { name: 'HiDockNotes', version: '0.5.0' } } })
+    expect(await initialize(server, version)).toMatchObject({ id: 1, result: { protocolVersion: version, capabilities: { tools: {} }, serverInfo: { name: product.name, version: product.version } } })
     const list = await server.receive({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
     expect(list).toMatchObject({ result: { tools: expect.arrayContaining([expect.objectContaining({ name: 'search_recordings', annotations: expect.objectContaining({ readOnlyHint: true, destructiveHint: false }) })]) } })
   })

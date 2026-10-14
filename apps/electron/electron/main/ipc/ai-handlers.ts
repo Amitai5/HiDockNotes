@@ -4,7 +4,7 @@ import { providerId, updateAISettings } from '../ai/settings'
 import { validateApiKey, type CredentialVault } from '../ai/credentials'
 import type { TranscriptionQueue } from '../ai/queue'
 import type { ProviderFactory } from '../ai/providers'
-import { confirmSpeaker, deleteVoiceProfile, deleteVoiceSample, listVoiceProfiles, mergeVoiceProfiles, nameSpeaker, renameVoiceProfile } from '../ai/voices'
+import { assignSegment, confirmSpeaker, deleteVoiceProfile, deleteVoiceSample, listVoiceProfiles, mergeVoiceProfiles, nameSpeaker, renameVoiceProfile } from '../ai/voices'
 import { RecordingAssistant } from '../ai/assistant'
 import type { ChatMessage } from '../../../src/shared/ai'
 import type { ChatGPTAuth } from '../ai/chatgpt-auth'
@@ -28,6 +28,8 @@ export function registerAIHandlers(queue: TranscriptionQueue, vault: CredentialV
     try { return await assistant.ask(text, project === null ? null : validateId(project), messages) } finally { chatting = false }
   })
   handle('ai:state', () => queue.state())
+  handle('ai:resume-review', confirmed => { queue.resumeReview(validateBoolean(confirmed)); return queue.state() })
+  handle('ai:cancel-summaries', () => queue.cancelQueuedSummaries())
   handle('ai:settings', patch => { updateAISettings(patch); queue.enqueuePending(); queue.kick(); changed(); return queue.state() })
   handle('ai:verify', async (value, input) => {
     const provider = providerId(value), key = validateApiKey(provider, input)
@@ -48,6 +50,10 @@ export function registerAIHandlers(queue: TranscriptionQueue, vault: CredentialV
   })
   handle('ai:remove-key', value => { vault.remove(providerId(value)); changed(); return queue.state() })
   handle('ai:process', id => queue.enqueue(validateId(id), true))
+  handle('ai:reprocess', (id, mode) => {
+    if (mode !== 'summarize' && mode !== 'transcribe') throw new Error('Choose resummarize or retranscribe.')
+    queue.reprocess(validateId(id), mode)
+  })
   handle('ai:process-pending', () => queue.enqueuePending(true))
   handle('chatgpt:sign-in', async id => { await chatgpt.startSignIn(id === null ? null : validateId(id)); return queue.state() })
   handle('chatgpt:cancel-sign-in', () => { chatgpt.cancelSignIn(); return queue.state() })
@@ -58,12 +64,20 @@ export function registerAIHandlers(queue: TranscriptionQueue, vault: CredentialV
     queue.kick(); changed(); return queue.state()
   })
   handle('chatgpt:sign-out', async id => { const message = await chatgpt.signOut(validateId(id)); return { state: queue.state(), message } })
+  handle('chatgpt:remove', async (id, confirmed) => {
+    if (!validateBoolean(confirmed)) throw new Error('Confirm before removing a saved ChatGPT account.')
+    const message = await chatgpt.remove(validateId(id))
+    const models = chatgpt.state().models, selection = readAISettings().chat
+    if (selection.provider === 'chatgpt' && !models.some(model => model.id === selection.model)) updateAISettings({ chat: { provider: 'chatgpt', model: models[0].id } })
+    queue.kick(); changed(); return { state: queue.state(), message }
+  })
   handle('chatgpt:models', async () => { await chatgpt.refreshModels(); queue.kick(); return queue.state() })
   handle('chatgpt:acknowledge-welcome', () => { chatgpt.acknowledgeWelcome(); return queue.state() })
   handle('chatgpt:manage-usage', () => openBrowser(CHATGPT_USAGE))
   handle('chatgpt:resume', () => { chatgpt.resume(); queue.kick(); return queue.state() })
   handle('voices:list', listVoiceProfiles)
   handle('voices:name-speaker', (id, name) => { nameSpeaker(validateId(id), validateText(name, 80)); changed() })
+  handle('voices:assign-segment', (recording, segment, name) => { assignSegment(validateId(recording), validateId(segment), validateText(name, 80)); changed() })
   handle('voices:confirm-speaker', id => { confirmSpeaker(validateId(id)); changed() })
   handle('voices:rename', (id, name) => { renameVoiceProfile(validateId(id), validateText(name, 80)); changed() })
   handle('voices:merge', (source, target) => { mergeVoiceProfiles(validateId(source), validateId(target)); changed() })

@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { readAudioDuration } from './audio-duration'
 import type { ActionableView, AppSettings, ProjectView, RecordingDetail, RecordingView } from '../../../src/shared/contracts'
 import type { LibraryNavigation } from '../../../src/shared/library'
+import type { MeetingOverview } from '../../../src/shared/meeting'
 
 export interface Recording { id: string; filename: string; file_path: string | null; file_size: number; date_recorded: string; duration_seconds: number | null; checksum: string | null; verified: number; status: RecordingView['status']; title: string | null; project_id: string | null }
 let connection: Database.Database | undefined
@@ -55,7 +56,17 @@ const migrations = [
   `ALTER TABLE actionables ADD COLUMN created_at TEXT;
    ALTER TABLE actionables ADD COLUMN due_date TEXT;
    ALTER TABLE actionables ADD COLUMN completed_at TEXT;
-   CREATE INDEX actionables_open_due ON actionables(done, due_date);`
+   CREATE INDEX actionables_open_due ON actionables(done, due_date);`,
+  `CREATE TABLE recording_tags (recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, tag TEXT NOT NULL, PRIMARY KEY(recording_id, tag));`,
+  `CREATE TABLE recording_overviews (recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE, meeting_type TEXT, participants TEXT, speaker_limited INTEGER NOT NULL DEFAULT 0);
+   CREATE INDEX IF NOT EXISTS segments_speaker ON segments(speaker_id);
+   ALTER TABLE recording_tags ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';
+   ALTER TABLE actionables ADD COLUMN owner TEXT;
+   ALTER TABLE transcription_jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'process';
+   ALTER TABLE transcription_jobs ADD COLUMN generation TEXT;`,
+  `ALTER TABLE recording_overviews ADD COLUMN expected_speakers INTEGER CHECK(expected_speakers BETWEEN 1 AND 10);
+   CREATE TABLE recording_deletions (recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE, device_done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);`,
+  `CREATE TABLE transcript_artifacts (segment_id TEXT PRIMARY KEY, recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL, speaker_id TEXT, reason TEXT NOT NULL, removed_at TEXT NOT NULL);`
 ]
 
 export function initializeDatabase(filePath: string): void {
@@ -113,18 +124,24 @@ export function saveSettings(patch: Partial<AppSettings>): void { runInTransacti
 export function listRecordings(search = '', status = ''): RecordingView[] {
   const terms = search.trim().split(/\s+/).filter(Boolean).map(t => '"' + t.replaceAll('"', '""') + '"*').join(' AND ')
   const params: unknown[] = []
-  let sql = 'SELECT r.*, s.text AS summary, j.message AS processingMessage, j.progress AS processingProgress FROM recordings r LEFT JOIN summaries s ON s.recording_id=r.id LEFT JOIN transcription_jobs j ON j.recording_id=r.id WHERE 1=1'
+  let sql = 'SELECT r.*, s.text AS summary, j.message AS processingMessage, j.progress AS processingProgress, j.mode AS processingMode FROM recordings r LEFT JOIN summaries s ON s.recording_id=r.id LEFT JOIN transcription_jobs j ON j.recording_id=r.id WHERE 1=1'
   if (terms) { sql += ' AND r.id IN (SELECT recording_id FROM recording_fts WHERE recording_fts MATCH ?)'; params.push(terms) }
   if (status) { sql += ' AND r.status=?'; params.push(status) }
   sql += ' ORDER BY r.date_recorded DESC'
   const positions = new Map(queryAll<{ recording_id: string }>("SELECT recording_id FROM transcription_jobs WHERE stage='queued' ORDER BY COALESCE(next_attempt_at,created_at),created_at").map((job, index) => [job.recording_id, index + 1]))
-  return queryAll<Recording & { summary: string | null; processingMessage: string | null; processingProgress: number | null }>(sql, params).map(r => ({ id: r.id, filename: r.filename, title: r.title, recordedAt: r.date_recorded, duration: r.duration_seconds, size: r.file_size, status: r.status, verified: r.verified === 1, hasAudio: r.file_path !== null, projectId: r.project_id, summary: r.summary, queuePosition: positions.get(r.id) ?? null, processingMessage: r.processingMessage, processingProgress: r.processingProgress }))
+  return queryAll<Recording & { summary: string | null; processingMessage: string | null; processingProgress: number | null; processingMode: RecordingView['processingMode'] }>(sql, params).map(r => ({ id: r.id, filename: r.filename, title: r.title, recordedAt: r.date_recorded, duration: r.duration_seconds, size: r.file_size, status: r.status, verified: r.verified === 1, hasAudio: r.file_path !== null, projectId: r.project_id, summary: r.summary, queuePosition: positions.get(r.id) ?? null, processingMessage: r.processingMessage, processingProgress: r.processingProgress, processingMode: r.processingMode }))
 }
 export function getDetail(id: string): RecordingDetail {
   const recording = listRecordings().find(r => r.id === id); if (!recording) throw new Error('Recording was not found.')
-  return { recording, segments: queryAll('SELECT s.id, s.start, s.end, s.text, s.speaker_id AS speakerId, p.label AS speakerName FROM segments s LEFT JOIN speakers p ON p.id=s.speaker_id WHERE s.recording_id=? ORDER BY s.start', [id]), actionables: listActionables().filter(a => a.recordingId === id),
-    processing: queryOne('SELECT stage, progress, message, error, attempt, next_attempt_at AS nextAttemptAt FROM transcription_jobs WHERE recording_id=?', [id]),
-    speakers: queryAll<{ id: string; label: string; profileId: string | null; suggestedProfileId: string | null; suggestedName: string | null; score: number | null; canRemember: number }>('SELECT s.id, s.label, s.voice_profile_id AS profileId, s.suggested_profile_id AS suggestedProfileId, p.name AS suggestedName, s.match_score AS score, s.embedding IS NOT NULL AS canRemember FROM speakers s LEFT JOIN voice_profiles p ON p.id=s.suggested_profile_id WHERE s.recording_id=? ORDER BY s.rowid', [id]).map(s => ({ ...s, canRemember: !!s.canRemember })) }
+  const overview = queryOne<{ meeting_type: string | null; participants: string | null; speaker_limited: number }>('SELECT meeting_type,participants,speaker_limited FROM recording_overviews WHERE recording_id=?', [id])
+  const meeting: MeetingOverview | null = overview?.meeting_type ? { meetingType: overview.meeting_type, participants: overview.participants ? JSON.parse(overview.participants) : [] } : null
+  if (meeting) {
+    const manual = new Map(queryAll<{ id: string; label: string }>("SELECT id,label FROM speakers WHERE recording_id=? AND label_source='manual'", [id]).map(speaker => [speaker.id, speaker.label]))
+    meeting.participants = meeting.participants.map(person => person.speakerId && manual.has(person.speakerId) ? { ...person, name: manual.get(person.speakerId)! } : person)
+  }
+  return { recording, meeting, expectedSpeakers: queryOne<{ expected_speakers: number | null }>('SELECT expected_speakers FROM recording_overviews WHERE recording_id=?', [id])?.expected_speakers ?? null, deletionPending: !!queryOne('SELECT recording_id FROM recording_deletions WHERE recording_id=?', [id]), speakerLimitReached: overview?.speaker_limited === 1, tags: queryAll<{ tag: string }>('SELECT tag FROM recording_tags WHERE recording_id=? ORDER BY rowid', [id]).map(row => row.tag), segments: queryAll('SELECT s.id, s.start, s.end, s.text, s.speaker_id AS speakerId, p.label AS speakerName FROM segments s LEFT JOIN speakers p ON p.id=s.speaker_id WHERE s.recording_id=? ORDER BY s.start', [id]), actionables: listActionables().filter(a => a.recordingId === id),
+    processing: queryOne('SELECT stage, progress, message, error, attempt, mode, next_attempt_at AS nextAttemptAt FROM transcription_jobs WHERE recording_id=?', [id]),
+    speakers: queryAll<{ id: string; label: string; profileId: string | null; suggestedProfileId: string | null; suggestedName: string | null; score: number | null; canRemember: number }>('SELECT s.id, s.label, s.voice_profile_id AS profileId, s.suggested_profile_id AS suggestedProfileId, p.name AS suggestedName, s.match_score AS score, s.embedding IS NOT NULL AS canRemember FROM speakers s LEFT JOIN voice_profiles p ON p.id=s.suggested_profile_id WHERE s.recording_id=? AND EXISTS(SELECT 1 FROM segments t WHERE t.speaker_id=s.id) ORDER BY s.rowid', [id]).map(s => ({ ...s, canRemember: !!s.canRemember })) }
 }
 export function renameRecording(id: string, title: string): void {
   const name = title.trim()
@@ -133,7 +150,14 @@ export function renameRecording(id: string, title: string): void {
 }
 export function listProjects(): ProjectView[] { return queryAll('SELECT p.id, p.name, count(r.id) AS count FROM projects p LEFT JOIN recordings r ON r.project_id=p.id GROUP BY p.id ORDER BY p.name') }
 export function libraryNavigation(): LibraryNavigation {
-  return { projects: listProjects(), looseRecordings: queryAll("SELECT id, filename, title FROM recordings WHERE project_id IS NULL ORDER BY date_recorded DESC, id") }
+  const recordings = queryAll<{ id: string; filename: string; title: string | null; projectId: string | null }>('SELECT id, filename, title, project_id AS projectId FROM recordings ORDER BY date_recorded DESC, id')
+  const projectRecordings: NonNullable<LibraryNavigation['projectRecordings']> = {}
+  const looseRecordings: LibraryNavigation['looseRecordings'] = []
+  for (const { projectId, ...recording } of recordings) {
+    if (projectId) (projectRecordings[projectId] ??= []).push(recording)
+    else looseRecordings.push(recording)
+  }
+  return { projects: listProjects(), looseRecordings, projectRecordings }
 }
 export function createProject(name: string): ProjectView { const id = randomUUID(); run('INSERT INTO projects VALUES (?, ?, ?)', [id, name, new Date().toISOString()]); return { id, name, count: 0 } }
-export function listActionables(): ActionableView[] { return queryAll<Omit<ActionableView, 'done'> & { done: number }>('SELECT id, text, done, recording_id AS recordingId, start, created_at AS createdAt, due_date AS dueDate, completed_at AS completedAt FROM actionables ORDER BY done, due_date IS NULL, due_date, rowid DESC').map(a => ({ ...a, done: a.done === 1 })) }
+export function listActionables(): ActionableView[] { return queryAll<Omit<ActionableView, 'done'> & { done: number }>('SELECT id, text, done, recording_id AS recordingId, start, owner, created_at AS createdAt, due_date AS dueDate, completed_at AS completedAt FROM actionables ORDER BY done, due_date IS NULL, due_date, rowid DESC').map(a => ({ ...a, done: a.done === 1 })) }

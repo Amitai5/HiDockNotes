@@ -1,0 +1,130 @@
+name: Build installers and release
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deduplicate a commit without cancelling a different version waiting to build.
+concurrency:
+  group: hidocknotes-release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/production'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      commit: ${{ steps.plan.outputs.commit }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Validate version and check existing release
+        id: plan
+        run: node scripts/release/prepare.cjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2022
+            package: package:win
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            package: package:linux
+          - platform: macos-x64
+            runner: macos-15-intel
+            package: package:mac
+          - platform: macos-arm64
+            runner: macos-15
+            package: package:mac
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install pinned npm
+        run: npm install --global npm@11.21.0 --ignore-scripts
+      - name: Install locked dependencies and native binaries
+        run: npm ci --strict-allow-scripts
+      - name: Check versions and native modules
+        run: |
+          npm run release:check
+          npm run smoke:native
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build installer
+        run: npm run ${{ matrix.package }}
+      - name: Test packaged native modules and resources
+        run: npm run smoke:package
+      - name: Collect platform installers
+        run: node scripts/release/artifacts.cjs ${{ matrix.platform }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installers-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}
+          path: release/${{ needs.prepare.outputs.version }}/assets/${{ matrix.platform }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: hidocknotes-publish-${{ needs.prepare.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installers-${{ needs.prepare.outputs.version }}-*
+          path: release/ci-assets
+          merge-multiple: true
+          digest-mismatch: error
+      - name: Verify downloads, create checksums and publish release
+        run: node scripts/release/publish.cjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}

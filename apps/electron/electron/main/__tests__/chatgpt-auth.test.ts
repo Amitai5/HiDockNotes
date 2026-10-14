@@ -148,7 +148,7 @@ describe('browser subscription session lifecycle', () => {
     expect(reopened.state().error).toContain('Remote revocation could not be confirmed')
     reopened.close()
   })
-  it('cancels the active session and revokes the latest token when sign-out overlaps rotation', async () => {
+  it.each(['signOut', 'remove'] as const)('cancels the active session and revokes the latest token when %s overlaps rotation', async action => {
     const id = await connect(), signal = auth.sessionSignal(id)
     clock += 3600000; rotatedRefresh = 'replacement-refresh-secret'
     const original = request.getMockImplementation()!
@@ -156,7 +156,7 @@ describe('browser subscription session lifecycle', () => {
     const gate = new Promise<void>(resolve => { release = resolve })
     request.mockImplementation(async (url, options) => { if (url === CHATGPT_TOKEN_ENDPOINT) await gate; return original(url, options) })
     const renewing = expect(auth.accessToken(id)).rejects.toThrow('account changed')
-    const signingOut = auth.signOut(id)
+    const signingOut = auth[action](id)
     expect(signal.aborted).toBe(true)
     expect(sessionEnded).toHaveBeenCalledWith(id)
     expect(auth.state().connected).toBe(false)
@@ -166,6 +166,38 @@ describe('browser subscription session lifecycle', () => {
     const revoke = request.mock.calls.find(([url]) => String(url).endsWith('/oauth/revoke'))!
     expect(((revoke[1] as RequestInit).body as URLSearchParams).get('token')).toBe('replacement-refresh-secret')
     expect(store.tokens(id)).toBeNull()
+  })
+  it('removes a signed-out duplicate without network calls or interrupting the active account', async () => {
+    const first = await connect(), firstSignal = auth.sessionSignal(first), previous = store.tokens(first)!
+    const second = store.save('oaiapp_two', store.registration(first), previous)
+    store.clearTokens(second); auth.select(first); request.mockClear(); sessionEnded.mockClear()
+    expect(await auth.remove(second)).toBeNull()
+    expect(auth.state().profiles.map(profile => profile.id)).toEqual([first])
+    expect(auth.state()).toMatchObject({ activeProfileId: first, connected: true, planEnabled: true })
+    expect(store.tokens(first)).toEqual(previous)
+    expect(firstSignal.aborted).toBe(false)
+    expect(sessionEnded).not.toHaveBeenCalledWith(first)
+    expect(request).not.toHaveBeenCalled()
+  })
+  it('removes the active registration, cancels its requests and selects a connected replacement', async () => {
+    const first = await connect()
+    const second = store.save('oaiapp_two', store.registration(first), store.tokens(first)!)
+    const signal = auth.sessionSignal(second)
+    expect(await auth.remove(second)).toBeNull()
+    expect(signal.aborted).toBe(true)
+    expect(sessionEnded).toHaveBeenCalledWith(second)
+    expect(auth.state()).toMatchObject({ activeProfileId: first, connected: true, planEnabled: true })
+    expect(() => store.registration(second)).toThrow('not found')
+    await expect(auth.accessToken(second)).rejects.toThrow('account changed')
+    expect(auth.sessionSignal(first).aborted).toBe(false)
+  })
+  it('still removes local credentials if remote revocation is unavailable and reports the warning', async () => {
+    const id = await connect(), original = request.getMockImplementation()!
+    request.mockImplementation(async (url, options) => String(url).endsWith('/oauth/revoke') ? new Response(null, { status: 503 }) : original(url, options))
+    expect(await auth.remove(id)).toContain('Remote revocation could not be confirmed')
+    expect(auth.state()).toMatchObject({ profiles: [], activeProfileId: null, connected: false })
+    expect(auth.state().error).toContain('Remote revocation could not be confirmed')
+    expect(() => store.registration(id)).toThrow('not found')
   })
   it('cancels requests from the previous account and never supplies its token after switching', async () => {
     const first = await connect(), firstSignal = auth.sessionSignal(first)

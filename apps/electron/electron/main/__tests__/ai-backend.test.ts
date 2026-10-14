@@ -5,11 +5,12 @@ import { ProcessingError } from '../ai/errors'
 import type { ModelCache } from '../ai/model-cache'
 import type { ProviderClient } from '../ai/providers'
 
-const mocks = vi.hoisted(() => ({ files: new Map<string, string>(), checksum: vi.fn(), convert: vi.fn(), preflight: vi.fn(), extract: vi.fn() }))
+const mocks = vi.hoisted(() => ({ files: new Map<string, string>(), checksum: vi.fn(), convert: vi.fn(), preflight: vi.fn(), extract: vi.fn(), speech: vi.fn() }))
 vi.mock('node:fs/promises', () => ({ mkdir: vi.fn(), rm: vi.fn(async (path: string) => { mocks.files.delete(path) }), readFile: vi.fn(async (path: string) => { if (!mocks.files.has(path)) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return mocks.files.get(path) }), writeFile: vi.fn(async (path: string, data: string) => { mocks.files.set(path, data) }), rename: vi.fn(async (from: string, to: string) => { mocks.files.set(to, mocks.files.get(from)!); mocks.files.delete(from) }) }))
 vi.mock('node:child_process', () => ({ execFile: (...args: unknown[]) => { mocks.extract(args); const callback = args[args.length - 1] as (error: unknown, output: string) => void; callback(null, '') } }))
 vi.mock('../services/audio-playback', () => ({ convertAudioFile: mocks.convert }))
 vi.mock('../services/audio-preflight', () => ({ analyzeAudioPreflight: mocks.preflight }))
+vi.mock('../ai/local-speech', async () => ({ ...(await vi.importActual('../ai/local-speech')), detectSpeech: mocks.speech }))
 vi.mock('../ai/model-cache', () => ({ sha256File: mocks.checksum, ModelCache: class {} }))
 
 describe('local transcription backend', () => {
@@ -20,10 +21,10 @@ describe('local transcription backend', () => {
   let observer: BackendObserver
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.files.clear(); mocks.checksum.mockResolvedValue('checked'); mocks.convert.mockResolvedValue('/converted.wav')
+    mocks.speech.mockImplementation(async () => (await mocks.preflight.mock.results.at(-1)!.value).activityIntervals ?? [{ start: 0, end: 20 }]); mocks.files.clear(); mocks.checksum.mockResolvedValue('checked'); mocks.convert.mockResolvedValue('/converted.wav')
     mocks.preflight.mockResolvedValue({ status: 'speech_present', durationSeconds: 20, activityIntervals: [{ start: 0, end: 20 }] })
     diarize = vi.fn().mockResolvedValue({ duration: 20, turns: [{ start: 0, end: 20, speaker: 0 }], embeddings: [{ speaker: 0, vector: [1, 0] }] })
-    models = vi.fn(() => ({ ensure: vi.fn().mockResolvedValue({ segmentation: '/seg.onnx', embedding: '/embed.onnx' }) }) as unknown as ModelCache)
+    models = vi.fn(() => ({ ensureSpeech: vi.fn().mockResolvedValue('/speech.onnx'), ensure: vi.fn().mockResolvedValue({ segmentation: '/seg.onnx', embedding: '/embed.onnx' }) }) as unknown as ModelCache)
     client = { listModels: vi.fn(), chat: vi.fn(), transcribe: vi.fn().mockResolvedValue({ text: 'Send it.', words: [{ start: 2, end: 3, text: 'Send' }, { start: 3, end: 4, text: 'it.' }], segments: [] }), summarize: vi.fn().mockResolvedValue({ title: 'Plan', summary: 'Send the plan.', actionItems: [{ text: 'Send the plan', start: 2 }] }) }
     observer = { stage: vi.fn(), checkpoint: vi.fn() }
   })
@@ -114,5 +115,32 @@ describe('local transcription backend', () => {
     await backend.process({ ...input, checksum: 'new-checksum' }, observer)
     expect(diarize).toHaveBeenCalledTimes(2)
     expect(mocks.preflight).toHaveBeenCalledTimes(2)
+  })
+  it('resummarizes the saved transcript without reading audio, preparing models, transcribing or requiring a transcription key', async () => {
+    const backend = new LocalTranscriptionBackend(() => client, diarize, models)
+    const checkpoint = { duration: 20, speakers: [], segments: [{ id: 's', start: 1, end: 2, text: 'Send the plan.', speakerId: null, speakerName: null }] }
+    const result = await backend.process({ ...input, savedTranscript: checkpoint, settings: { ...input.settings, transcription: { provider: 'openai', model: 'whisper-1' } } }, observer)
+    expect(result).toMatchObject({ ...checkpoint, transcriptChanged: false })
+    expect(client.summarize).toHaveBeenCalledOnce()
+    expect(client.transcribe).not.toHaveBeenCalled(); expect(mocks.checksum).not.toHaveBeenCalled(); expect(mocks.convert).not.toHaveBeenCalled(); expect(diarize).not.toHaveBeenCalled(); expect(models).not.toHaveBeenCalled(); expect(observer.checkpoint).not.toHaveBeenCalled()
+  })
+  it('explicit retranscription bypasses old transcript caches and resummarizes, while a retry of the same generation resumes', async () => {
+    const backend = new LocalTranscriptionBackend(() => client, diarize, models)
+    await backend.process(input, observer)
+    vi.mocked(client.summarize).mockRejectedValueOnce(new ProcessingError('Summary interrupted.'))
+    await expect(backend.process({ ...input, generation: 'retranscribe-1' }, observer)).rejects.toThrow('Summary interrupted')
+    await backend.process({ ...input, generation: 'retranscribe-1' }, observer)
+    expect(client.transcribe).toHaveBeenCalledTimes(2)
+    expect(client.summarize).toHaveBeenCalledTimes(3)
+    expect(diarize).toHaveBeenCalledOnce()
+    expect(mocks.preflight).toHaveBeenCalledOnce()
+  })
+  it('keeps speaker identities attached to voices when native cluster numbers swap', async () => {
+    diarize.mockResolvedValueOnce({ duration: 20, turns: [{ start: 0, end: 10, speaker: 0 }, { start: 10, end: 20, speaker: 1 }], embeddings: [{ speaker: 0, vector: [1, 0] }, { speaker: 1, vector: [0, 1] }] })
+    diarize.mockResolvedValueOnce({ duration: 20, turns: [{ start: 0, end: 10, speaker: 1 }, { start: 10, end: 20, speaker: 0 }], embeddings: [{ speaker: 0, vector: [0, 1] }, { speaker: 1, vector: [1, 0] }] })
+    const backend = new LocalTranscriptionBackend(() => client, diarize, models)
+    const first = await backend.process(input, observer), second = await backend.process({ ...input, expectedSpeakers: 2 }, observer)
+    expect(first.speakers[0].id).toBe(second.speakers[1].id)
+    expect(first.speakers[1].id).toBe(second.speakers[0].id)
   })
 })

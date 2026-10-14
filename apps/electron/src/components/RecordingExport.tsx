@@ -6,8 +6,10 @@ import { DEFAULT_EXPORT_OPTIONS, isSubtitleFormat, type RecordingExportOptions, 
 import { Button } from './ui'
 import { reportError } from '../store/useAppStore'
 
-export function RecordingExport({ recording }: { recording: RecordingView }): JSX.Element {
-  const [open, setOpen] = useState(false)
+export function RecordingExport({ recording, open: controlledOpen, onOpenChange, onClosed }: { recording: RecordingView; open?: boolean; onOpenChange?(open: boolean): void; onClosed?(): void }): JSX.Element {
+  const [localOpen, setLocalOpen] = useState(false)
+  const open = controlledOpen ?? localOpen
+  const setOpen = onOpenChange ?? setLocalOpen
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [options, setOptions] = useState<RecordingExportOptions>({ ...DEFAULT_EXPORT_OPTIONS })
@@ -18,8 +20,8 @@ export function RecordingExport({ recording }: { recording: RecordingView }): JS
     } catch (error) { reportError(error) } finally { setBusy(false) }
   }
   return <div className="recording-export"><Dialog.Root open={open} onOpenChange={value => { if (!busy) { setOpen(value); if (value) setSaved(false) } }}>
-    <Dialog.Trigger asChild><Button><Download size={16} />Export</Button></Dialog.Trigger>
-    <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="confirmation-dialog export-dialog">
+    {controlledOpen === undefined && <Dialog.Trigger asChild><Button><Download size={16} />Export</Button></Dialog.Trigger>}
+    <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="confirmation-dialog export-dialog" onCloseAutoFocus={event => { if (onClosed) { event.preventDefault(); onClosed() } }}>
       <div className="panel-heading"><Dialog.Title>Export recording</Dialog.Title><Dialog.Close asChild><Button variant="ghost" disabled={busy} aria-label="Close export options"><X size={17} /></Button></Dialog.Close></div>
       <Dialog.Description>Choose which notes to save and whether to include a playable audio copy.</Dialog.Description>
       <form onSubmit={event => { event.preventDefault(); void save() }}>

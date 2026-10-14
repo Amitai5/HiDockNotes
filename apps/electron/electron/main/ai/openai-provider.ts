@@ -36,7 +36,7 @@ export class OpenAIProvider implements ProviderClient {
   async summarize(model: string, segments: TranscriptSegment[], settings: AISettings, signal?: AbortSignal, context?: SummaryContext): Promise<SummaryResult> {
     try {
       const response = await this.client.responses.create({ model, store: false, instructions: summaryInstructions(settings, context), input: transcriptContent(segments), text: { format: { type: 'json_schema', name: 'recording_summary', strict: true, schema: SUMMARY_SCHEMA } }, max_output_tokens: 6000 }, { signal })
-      return parseSummary(response.output_text, Math.max(0, ...segments.map(s => s.end)))
+      return parseSummary(response.output_text, Math.max(0, ...segments.map(s => s.end)), context?.evidenceSegments ?? segments)
     } catch (error) { if (error instanceof ProcessingError) throw error; throw providerError(error) }
   }
   async chat(model: string, instructions: string, content: string, signal?: AbortSignal): Promise<string> {

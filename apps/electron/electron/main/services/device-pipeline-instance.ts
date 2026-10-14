@@ -32,13 +32,21 @@ let pipelineInstance: DevicePipelineService | null = null
 export function getDevicePipelineService(): DevicePipelineService {
   if (!pipelineInstance) {
     const raw = getJensenDevice()
+    let connecting = false
     const downloads = getDownloadService()
     downloads.setFileVerifier(verifyDownloadedBytes)
     // Every command and its asynchronous drain occupy the SAME serializer.
     // No application command can pass a cancelled stream still being absorbed.
     const adapter: PipelineJensen = {
-      connect: signal => serializeDeviceOperation(() => raw.isConnected() ? Promise.resolve(true) : raw.connect(signal)),
-      tryConnect: () => serializeDeviceOperation(() => raw.tryConnect()),
+      connect: signal => serializeDeviceOperation(async () => {
+        if (raw.isConnected()) return true
+        connecting = true
+        try { return await raw.connect(signal) } finally { connecting = false }
+      }),
+      tryConnect: () => serializeDeviceOperation(async () => {
+        connecting = true
+        try { return await raw.tryConnect() } finally { connecting = false }
+      }),
       disconnect: () => serializeDeviceOperation(() => raw.disconnect()),
       isConnected: () => raw.isConnected(),
       getModel: () => raw.getModel(),
@@ -69,7 +77,8 @@ export function getDevicePipelineService(): DevicePipelineService {
         if (!current || current.recording === filename) throw new Error('Cannot delete while recording state is unknown or this file is being recorded.')
         const files = await raw.listFiles()
         const file = files?.find(f => f.name === filename)
-        if (!file || !await hasVerifiedCopy(filename, file.length, raw.serialNumber)) throw new Error('Local verification failed. Download and verify the recording first.')
+        if (!files || !await hasVerifiedCopy(filename, file?.length ?? getRecordingByFilename(filename)?.file_size ?? -1, raw.serialNumber)) throw new Error('Local verification failed. Download and verify the recording first.')
+        if (!file) return { result: 'success' } // A fresh list confirms a previous acknowledged deletion.
         return raw.deleteFile(filename)
       })
     }
@@ -108,7 +117,7 @@ export function getDevicePipelineService(): DevicePipelineService {
         },
         canDelete: async filename => {
           const file = pipelineInstance?.getFiles().find(f => f.name === filename)
-          return !!file && await hasVerifiedCopy(filename, file.length, raw.serialNumber)
+          return await hasVerifiedCopy(filename, file?.length ?? getRecordingByFilename(filename)?.file_size ?? -1, raw.serialNumber)
         },
         replacementFor: (filename, size) => {
           const rec = getRecordingByFilename(filename)
@@ -124,7 +133,13 @@ export function getDevicePipelineService(): DevicePipelineService {
         isHiDockDevice: d => USB_VENDOR_IDS.includes((d as USBDevice).vendorId)
       }
     )
-    raw.ondisconnect = () => pipelineInstance?.notifyDisconnected()
+    raw.ondisconnect = reason => {
+      // tryConnect gracefully cleans the previous transport before opening a
+      // new one. That callback must not abort this new connection's controller.
+      // A real unplug still cancels immediately, including during connection.
+      if (connecting && reason === 'cleanup') return
+      pipelineInstance?.notifyDisconnected()
+    }
     raw.onconnect = () => {
       if (pipelineInstance?.getState().phase === 'disconnected') void pipelineInstance.connect().catch(error => emitActivityLog('error', error instanceof Error ? error.message : 'Could not reconnect.'))
     }

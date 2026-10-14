@@ -1,7 +1,7 @@
 import tseslint from 'typescript-eslint'
 
 export default [
-  { ignores: ['**/node_modules/**', '**/out/**', '**/dist/**', '**/release/**'] },
+  { ignores: ['**/node_modules/**', '**/out/**', '**/dist/**', 'release/**'] },
   ...tseslint.configs.recommended,
   { files: ['**/*.cjs'], rules: { '@typescript-eslint/no-require-imports': 'off' } },
   {

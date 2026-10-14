@@ -9,6 +9,7 @@ import { isTimedText, readProcessingCache, writeProcessingCache } from './proces
 import { WhisperModelCache, whisperModelId, type WhisperModelFiles, type WhisperModelId } from './whisper-model-cache'
 import type { AudioChunk, ProviderClient, SummaryResult, TimedText, TranscriptionResult } from './providers'
 import type { OfflineRecognizer, OfflineRecognizerResult } from 'sherpa-onnx-node'
+import { filterSpeechTranscript } from './local-speech'
 
 type NativeRuntime = typeof import('sherpa-onnx-node')['default']
 interface LocalDependencies { cache: Pick<WhisperModelCache, 'ensure'>; load?(): Promise<NativeRuntime>; threads?: number }
@@ -58,7 +59,7 @@ export class LocalWhisperProvider implements ProviderClient {
     if (wave.sampleRate !== 16000 || !wave.samples.length) throw new ProcessingError('Local Whisper needs non-empty 16 kHz mono audio.')
     const duration = wave.samples.length / wave.sampleRate
     const windows = planChunks(duration, 25, 1), segments: TimedText[] = []
-    const cacheSignature = chunk.checkpointDirectory ? createHash('sha256').update(JSON.stringify(['whisper-timing-v2', modelId, language, chunk.activityIntervals])).update(Buffer.from(wave.samples.buffer, wave.samples.byteOffset, wave.samples.byteLength)).digest('hex') : null
+    const cacheSignature = chunk.checkpointDirectory ? createHash('sha256').update(JSON.stringify(['whisper-speech-v4', modelId, language, chunk.activityIntervals])).update(Buffer.from(wave.samples.buffer, wave.samples.byteOffset, wave.samples.byteLength)).digest('hex') : null
     for (let index = 0; index < windows.length; index++) {
       signal?.throwIfAborted()
       const window = windows[index], sectionDuration = window.end - window.start
@@ -89,7 +90,8 @@ export class LocalWhisperProvider implements ProviderClient {
         if (checkpointPath) await writeProcessingCache(checkpointPath, section)
       }
       signal?.throwIfAborted()
-      segments.push(...stitchChunk(section, window))
+      const stitched = stitchChunk(section, window)
+      segments.push(...(chunk.activityIntervals ? filterSpeechTranscript(stitched, chunk.activityIntervals) : stitched))
       progress(`Transcribed ${index + 1} of ${windows.length} local sections.`, (index + 1) / windows.length)
     }
     return { text: segments.map(segment => segment.text).join(' '), segments, words: [] }

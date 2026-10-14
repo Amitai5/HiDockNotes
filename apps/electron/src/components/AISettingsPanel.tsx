@@ -5,6 +5,7 @@ import { DEFAULT_CHATGPT_MODELS, DEFAULT_MODELS, LOCAL_TRANSCRIPTION_MODELS } fr
 import { Button, Toggle } from './ui'
 import { reportError } from '../store/useAppStore'
 import { ChatGPTAccountPanel } from './ChatGPTAccountPanel'
+import { ProcessingControls } from './ProcessingControls'
 
 export function AISettingsPanel({ sections = ['providers', 'transcription', 'thresholds'] }: { sections?: readonly ('providers' | 'transcription' | 'thresholds')[] }): JSX.Element {
   const [state, setState] = useState<AIState | null>(null)
@@ -66,6 +67,7 @@ export function AISettingsPanel({ sections = ['providers', 'transcription', 'thr
     </section>}
     {sections.includes('transcription') && <section className="settings-section" id="transcription" tabIndex={-1}><h2><Sparkles size={18} />Transcription</h2>
       <p>{state?.ready ? 'Ready. New verified downloads will be processed automatically when enabled.' : state?.reason ?? 'Loading AI settings…'}</p>
+      {state && <ProcessingControls state={state} onChanged={accept} />}
       {state?.ready && state.summaryReason && <p>Transcripts will be saved locally. {state.summaryReason} Pending summaries will be added automatically after setup.</p>}
       <div className="setting-row"><div><strong>Auto-transcribe on download</strong><p>Queue verified downloads and existing unprocessed recordings. One recording runs at a time.</p></div><Toggle label="Auto-transcribe on download" checked={state?.settings.autoTranscribe ?? true} disabled={busy || !state} onChange={value => { void update({ autoTranscribe: value }) }} /></div>
       {state && <div className="transcription-options"><label>Summary template<select aria-label="Summary template" value={state.settings.summaryTemplate} disabled={busy} onChange={event => { void update({ summaryTemplate: event.target.value as AISettings['summaryTemplate'] }) }}><option value="meeting">Meeting</option><option value="call">Call</option><option value="interview">Interview</option><option value="dictation">Dictation</option><option value="custom">Custom prompt</option></select></label><form onSubmit={event => { event.preventDefault(); void update({ language }) }}><label>Language<input aria-label="Transcription language" value={language} onChange={event => setLanguage(event.target.value)} placeholder="auto, en, en-US…" /></label><Button type="submit" disabled={busy}>Save language</Button></form></div>}

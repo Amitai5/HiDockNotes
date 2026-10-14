@@ -1,10 +1,10 @@
 import * as SwitchPrimitive from '@radix-ui/react-switch'
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { LoaderCircle } from 'lucide-react'
 
-export function Button({ children, variant = 'secondary', busy, className = '', disabled, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; busy?: boolean }): JSX.Element {
-  return <button className={`button button-${variant} ${className}`} disabled={disabled || busy} {...props}>{busy && <LoaderCircle className="animate-spin" size={15} />}{children}</button>
-}
+export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger'; busy?: boolean }>(function Button({ children, variant = 'secondary', busy, className = '', disabled, ...props }, ref) {
+  return <button ref={ref} className={`button button-${variant} ${className}`} disabled={disabled || busy} {...props}>{busy && <LoaderCircle className="animate-spin" size={15} />}{children}</button>
+})
 export function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange(value: boolean): void; disabled?: boolean; label: string }): JSX.Element {
   return <SwitchPrimitive.Root className="switch" checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={label}><SwitchPrimitive.Thumb className="switch-thumb" /></SwitchPrimitive.Root>
 }

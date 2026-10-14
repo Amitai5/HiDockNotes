@@ -40,10 +40,10 @@ describe('bounded local speaker detection', () => {
     expect(result.turns.map(turn => turn.speaker)).toEqual([0, 1, 1, 0])
     expect(result.turns.map(turn => turn.start)).toEqual([0, 4, 120, 124])
   })
-  it('never merges two voices from the same section into one global speaker', () => {
+  it('merges native over-splits when the same voice has no overlapping turns', () => {
     const result = mergeDiarizationWindows([section(0, 120, [[1, 0]]), section(120, 140, [[1, 0], [1, 0]])], 140)
-    expect(result.embeddings).toHaveLength(2)
-    expect(result.turns.slice(1).map(turn => turn.speaker)).toEqual([0, 1])
+    expect(result.embeddings).toHaveLength(1)
+    expect(result.turns.slice(1).map(turn => turn.speaker)).toEqual([0, 0])
   })
   it('creates a separate speaker for ambiguous matches and voices without a clean embedding', () => {
     const ambiguous = section(120, 140, [[Math.SQRT1_2, Math.SQRT1_2]])
@@ -82,5 +82,12 @@ describe('bounded local speaker detection', () => {
     expect(isDiarizedAudio(audio, 20)).toBe(false)
     expect(isDiarizedAudio({ ...audio, turns: [{ start: 0, end: 11, speaker: 0 }] }, 10)).toBe(false)
     expect(isDiarizedAudio({ ...audio, embeddings: [{ speaker: 0, vector: [NaN, 0] }] }, 10)).toBe(false)
+  })
+  it('pools short clean turns to recognize a recurring voice instead of discarding every turn', async () => {
+    native.readWave.mockReturnValue({ sampleRate: 16000, samples: new Float32Array(10 * 16000) })
+    native.process.mockReturnValue(Array.from({ length: 6 }, (_, index) => ({ start: index, end: index + 0.4, speaker: 0 })))
+    const result = await diarizeAudio('/audio.wav', { segmentation: '/seg', embedding: '/embed' })
+    expect(result.embeddings).toEqual([{ speaker: 0, vector: [1, 0] }])
+    expect(native.compute).toHaveBeenCalledOnce()
   })
 })

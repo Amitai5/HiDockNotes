@@ -40,6 +40,22 @@ export function nameSpeaker(speakerId: string, value: string): void {
     refreshTranscript(speaker.recording_id)
   })
 }
+/** Assigns one previously unidentified segment without enrolling mixed or unknown audio. */
+export function assignSegment(recordingId: string, segmentId: string, value: string): void {
+  const name = nameValue(value)
+  if (!queryOne('SELECT id FROM segments WHERE id=? AND recording_id=?', [segmentId, recordingId])) throw new Error('Transcript segment was not found.')
+  if (queryOne("SELECT id FROM transcription_jobs WHERE recording_id=? AND stage NOT IN ('done','empty','failed')", [recordingId])) throw new Error('Wait for processing to finish before assigning this segment.')
+  runInTransaction(() => {
+    let speaker = queryOne<{ id: string }>("SELECT id FROM speakers WHERE recording_id=? AND lower(label)=lower(?) AND label_source='manual'", [recordingId, name])
+    if (!speaker) {
+      const profile = queryOne<{ id: string }>('SELECT id FROM voice_profiles WHERE lower(name)=lower(?)', [name])
+      speaker = { id: randomUUID() }
+      run("INSERT INTO speakers(id,recording_id,label,voice_profile_id,label_source) VALUES (?,?,?,?,'manual')", [speaker.id, recordingId, name, profile?.id ?? null])
+    }
+    run('UPDATE segments SET speaker_id=? WHERE id=? AND recording_id=?', [speaker.id, segmentId, recordingId])
+    refreshTranscript(recordingId)
+  })
+}
 export function confirmSpeaker(id: string): void {
   const row = queryOne<{ name: string }>('SELECT p.name FROM speakers s JOIN voice_profiles p ON p.id=s.suggested_profile_id WHERE s.id=?', [id])
   if (!row) throw new Error('This speaker has no current voice suggestion.')

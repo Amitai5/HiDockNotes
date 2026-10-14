@@ -15,7 +15,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
   useAppStore.setState({ settings: { name: 'Dana', appearance: 'dark', autoConnect: true, autoDownload: true, recordingsPath: '/audio' }, error: null })
   update.mockReset().mockImplementation(async patch => ({ ...useAppStore.getState().settings, ...patch }))
-  window.electronAPI = { app: { info: vi.fn(async () => ({ version: '0.5.0', electron: '44', platform: 'win32' })) }, settings: { update } } as unknown as ElectronAPI
+  window.electronAPI = { app: { info: vi.fn(async () => ({ version: '0.5.0', electron: '44', platform: 'win32' })) }, settings: { update }, backups: { state: vi.fn(async () => ({ phase: 'idle' })), onState: vi.fn(() => vi.fn()), create: vi.fn(async () => null) } } as unknown as ElectronAPI
 })
 afterEach(cleanup)
 describe('searchable Settings tabs', () => {
@@ -58,5 +58,13 @@ describe('searchable Settings tabs', () => {
     expect(screen.getByLabelText('Your name')).toHaveValue('New name')
     fireEvent.click(screen.getByRole('button', { name: 'Save name' }))
     await waitFor(() => expect(update).toHaveBeenCalledWith({ name: 'New name' }))
+  })
+  it('finds the complete backup through Settings search and opens its controls', async () => {
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+    fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'backup' } })
+    fireEvent.click(screen.getByRole('button', { name: /Library backup/ }))
+    expect(screen.getByRole('tab', { name: 'Device & storage' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Create backup' }))
+    await waitFor(() => expect(window.electronAPI.backups.create).toHaveBeenCalledOnce())
   })
 })

@@ -666,9 +666,24 @@ describe('DevicePipelineService', () => {
       const jensen = makeJensen()
       const svc = new DevicePipelineService(jensen, makeDownloadService())
       svc['opts'].canDelete = async () => true
+      await svc.connect()
       const res = await svc.deleteFile('gone.hda')
       expect(jensen.deleteFile).toHaveBeenCalledWith('gone.hda')
       expect(res).toEqual({ result: 'success' })
+    })
+    it('waits for an idle status poll before deletion and reserves the bus against another poll', async () => {
+      let release: (() => void) | undefined
+      const recording = vi.fn().mockResolvedValueOnce({ recording: null }).mockImplementationOnce(() => new Promise(resolve => { release = () => resolve({ recording: null }) }))
+      const jensen = makeJensen({ getRecordingFile: recording })
+      const svc = new DevicePipelineService(jensen, makeDownloadService(), { canDelete: async () => true, getConfig: () => ({ device: { autoDownload: false } }) })
+      await svc.connect()
+      const poll = svc.pollForNewRecordings(), deletion = svc.deleteFile('a.hda')
+      await svc.pollForNewRecordings()
+      expect(jensen.deleteFile).not.toHaveBeenCalled()
+      expect(recording).toHaveBeenCalledTimes(2)
+      release!(); await poll
+      expect(await deletion).toEqual({ result: 'success' })
+      expect(jensen.deleteFile).toHaveBeenCalledExactlyOnceWith('a.hda')
     })
     it('does not expose a destructive format action', async () => {
       const jensen = makeJensen()

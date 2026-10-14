@@ -1,8 +1,9 @@
 {
   "name": "hidocknotes",
-  "version": "0.5.0",
+  "version": "0.9.3",
   "private": true,
   "license": "MIT",
+  "packageManager": "npm@11.21.0",
   "workspaces": [
     "apps/electron",
     "packages/jensen-protocol"
@@ -16,17 +17,24 @@
     "better-sqlite3": false,
     "@hidock/jensen-protocol": true,
     "@google/genai": false,
-    "protobufjs": false
+    "protobufjs": false,
+    "fsevents": false
   },
   "scripts": {
     "dev": "npm run dev --workspace=apps/electron",
     "build": "npm run build --workspace=packages/jensen-protocol && npm run build --workspace=apps/electron",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint apps/electron packages/jensen-protocol/src packages/jensen-protocol/tests",
-    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint apps/electron packages/jensen-protocol/src packages/jensen-protocol/tests scripts/release",
+    "test": "npm run test:release && npm run test --workspaces --if-present",
+    "test:release": "node --test scripts/release/*.test.cjs",
+    "release:check": "node scripts/release/version.cjs",
+    "release:version": "node scripts/release/version.cjs",
+    "smoke:native": "node scripts/release/native-smoke.cjs",
+    "smoke:package": "node scripts/release/native-smoke.cjs --packaged",
     "start": "npm run start --workspace=apps/electron",
     "package:win": "npm run build && npm run package:win --workspace=apps/electron",
-    "package:mac": "npm run build && npm run package:mac --workspace=apps/electron"
+    "package:mac": "npm run build && npm run package:mac --workspace=apps/electron",
+    "package:linux": "npm run build && npm run package:linux --workspace=apps/electron"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

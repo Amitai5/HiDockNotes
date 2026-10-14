@@ -16,7 +16,9 @@ export interface VoiceMatch { profileId: string | null; suggestedId: string | nu
 export function matchVoice(embedding: number[] | null, profiles: VoiceCandidate[], fallback: string, suggest: number, auto: number): VoiceMatch {
   const matches = embedding ? profiles.map(p => ({ profile: p, score: Math.max(-1, ...p.embeddings.map(sample => cosineSimilarity(embedding, sample) ?? -1)) })).sort((a, b) => b.score - a.score) : []
   const best = matches[0]
-  if (best && best.score >= auto) return { profileId: best.profile.id, suggestedId: null, label: best.profile.name, score: best.score }
+  // Similar profiles need a confirmation even above the absolute threshold;
+  // the closest of two nearly identical samples is not a reliable identity.
+  if (best && best.score >= auto && (!matches[1] || best.score - matches[1].score >= 0.08)) return { profileId: best.profile.id, suggestedId: null, label: best.profile.name, score: best.score }
   if (best && best.score >= suggest) return { profileId: null, suggestedId: best.profile.id, label: fallback, score: best.score }
   return { profileId: null, suggestedId: null, label: fallback, score: best?.score ?? null }
 }

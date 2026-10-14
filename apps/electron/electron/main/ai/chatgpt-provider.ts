@@ -13,7 +13,7 @@ export class ChatGPTProvider implements ProviderClient {
   async transcribe(_model: string, _chunk: AudioChunk): Promise<TranscriptionResult> { throw new ProcessingError('ChatGPT plan usage does not support audio transcription. Choose Gemini or OpenAI for transcription.') }
   async summarize(model: string, segments: TranscriptSegment[], settings: AISettings, signal?: AbortSignal, context?: SummaryContext): Promise<SummaryResult> {
     const text = await this.respond(model, summaryInstructions(settings, context), transcriptContent(segments), true, signal)
-    return parseSummary(text, Math.max(0, ...segments.map(segment => segment.end)))
+    return parseSummary(text, Math.max(0, ...segments.map(segment => segment.end)), context?.evidenceSegments ?? segments)
   }
   async chat(model: string, instructions: string, content: string, signal?: AbortSignal): Promise<string> { return this.respond(model, instructions, content, false, signal) }
   private async respond(model: string, instructions: string, content: string, structured: boolean, signal?: AbortSignal): Promise<string> {

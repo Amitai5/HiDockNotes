@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { closeDatabase, getDetail, initializeDatabase, queryAll, queryOne, run, upsertRecordingFromDevice } from '../services/database'
-import { confirmSpeaker, deleteVoiceProfile, deleteVoiceSample, listVoiceProfiles, MAX_VOICE_SAMPLES, mergeVoiceProfiles, nameSpeaker, renameVoiceProfile, voiceCandidates } from '../ai/voices'
+import { assignSegment, confirmSpeaker, deleteVoiceProfile, deleteVoiceSample, listVoiceProfiles, MAX_VOICE_SAMPLES, mergeVoiceProfiles, nameSpeaker, renameVoiceProfile, voiceCandidates } from '../ai/voices'
 import { embeddingBytes } from '../ai/voice-matching'
 import { deterministicId } from '../ai/alignment'
 
@@ -24,6 +24,15 @@ describe('local remembered voices', () => {
     expect(queryOne<{ text: string }>('SELECT text FROM transcripts')?.text).toContain('Dana')
     nameSpeaker(recording.speaker, 'Dana')
     expect(listVoiceProfiles()[0].samples).toHaveLength(1)
+  })
+  it('assigns only the requested unidentified segment, validates ownership and never enrolls uncertain audio', () => {
+    const first = fixture(1), other = fixture(2), segment = deterministicId('segment-1')
+    run('UPDATE segments SET speaker_id=NULL WHERE id=?', [segment])
+    expect(() => assignSegment(other.id, segment, 'Dana')).toThrow('not found')
+    assignSegment(first.id, segment, 'Dana')
+    expect(getDetail(first.id).segments[0].speakerName).toBe('Dana')
+    expect(queryOne('SELECT id FROM voice_samples')).toBeUndefined()
+    expect(getDetail(other.id).segments[0].speakerName).toBe('Speaker 1')
   })
   it('corrects a wrong label by moving only that speaker sample', () => {
     const first = fixture(1), second = fixture(2)

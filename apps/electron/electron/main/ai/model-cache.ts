@@ -13,6 +13,11 @@ const execute = promisify(execFile)
 // The older release assets have no GitHub digest field; hashes are pinned here
 // so later downloads and cached files are checked against the reviewed bytes.
 export const MODEL_ASSETS = {
+  speech: {
+    url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx',
+    sha256: '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6',
+    size: 643854
+  },
   segmentation: {
     url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2',
     sha256: '24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488',
@@ -37,6 +42,12 @@ export function verifyDigest(actual: string, expected: string): void {
 async function valid(path: string, hash: string): Promise<boolean> { try { return await sha256File(path) === hash } catch { return false } }
 export class ModelCache {
   constructor(private readonly folder: string, private readonly request: typeof fetch = fetch) {}
+  async ensureSpeech(progress: (message: string) => void, signal?: AbortSignal): Promise<string> {
+    await mkdir(this.folder, { recursive: true })
+    const model = join(this.folder, 'silero_vad.onnx')
+    if (!await valid(model, MODEL_ASSETS.speech.sha256)) await this.download(MODEL_ASSETS.speech, model, () => progress('Downloading the local speech detector…'), signal)
+    return model
+  }
   async ensure(progress: (message: string, fraction: number) => void, signal?: AbortSignal): Promise<DiarizationModels> {
     await mkdir(this.folder, { recursive: true })
     const segmentation = join(this.folder, 'pyannote-segmentation-3.0.onnx')

@@ -64,7 +64,7 @@ describe('provider timestamp contracts', () => {
     expect(remove).toHaveBeenCalledTimes(2)
   })
   it('keeps provider summaries structured and disables stored OpenAI responses', async () => {
-    const create = vi.fn().mockResolvedValue({ output_text: JSON.stringify({ title: 'Plan', summary: 'A useful summary', actionItems: [] }) })
+    const create = vi.fn().mockResolvedValue({ output_text: JSON.stringify({ title: 'Plan', meetingType: 'Planning', participants: [], tags: ['planning', 'operations', 'meeting'], summary: 'A useful summary', actionItems: [] }) })
     const provider = new OpenAIProvider('fake', { responses: { create } } as unknown as OpenAI)
     await provider.summarize('gpt-5.4-mini', [{ id: 'one', start: 0, end: 1, text: 'Hello', speakerId: null, speakerName: 'Dana' }], DEFAULT_AI_SETTINGS)
     expect(create.mock.calls[0][0]).toMatchObject({ store: false, text: { format: { type: 'json_schema', strict: true } } })

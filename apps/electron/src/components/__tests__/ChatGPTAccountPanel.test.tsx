@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AISettingsPanel } from '../AISettingsPanel'
 import { ChatGPTAccountPanel } from '../ChatGPTAccountPanel'
 import { DEFAULT_AI_SETTINGS, DEFAULT_CHATGPT_MODELS, DEFAULT_MODELS, type AIState, type ChatGPTState } from '../../shared/ai'
@@ -10,7 +10,7 @@ import type { ElectronAPI } from '../../shared/contracts'
 
 describe('subscription settings and consent UI', () => {
   let state: AIState
-  const signIn = vi.fn(), acknowledgeWelcome = vi.fn(), manageUsage = vi.fn(), resume = vi.fn()
+  const signIn = vi.fn(), acknowledgeWelcome = vi.fn(), manageUsage = vi.fn(), resume = vi.fn(), select = vi.fn(), remove = vi.fn()
   beforeEach(() => {
     const chatgpt: ChatGPTState = { profiles: [], activeProfileId: null, connected: false, planEnabled: false, signingIn: false, error: null, welcomePending: false, models: DEFAULT_CHATGPT_MODELS, offline: true, usageBlocked: false }
     state = { settings: structuredClone(DEFAULT_AI_SETTINGS), providers: (['gemini', 'openai'] as const).map(provider => ({ provider, configured: false, verified: false, verifiedAt: null, models: DEFAULT_MODELS[provider], offline: true })), ready: false, reason: 'Verify Gemini.', chatgpt }
@@ -18,7 +18,9 @@ describe('subscription settings and consent UI', () => {
     acknowledgeWelcome.mockReset().mockImplementation(async () => { state.chatgpt!.welcomePending = false; return structuredClone(state) })
     manageUsage.mockReset().mockResolvedValue(undefined)
     resume.mockReset().mockImplementation(async () => { state.chatgpt!.usageBlocked = false; state.chatgpt!.error = null; return structuredClone(state) })
-    window.electronAPI = { ai: { getState: vi.fn(async () => structuredClone(state)), chatgpt: { signIn, acknowledgeWelcome, manageUsage, resume } } } as unknown as ElectronAPI
+    select.mockReset().mockImplementation(async (id: string) => { state.chatgpt!.activeProfileId = id; return structuredClone(state) })
+    remove.mockReset().mockImplementation(async (id: string) => { state.chatgpt!.profiles = state.chatgpt!.profiles.filter(profile => profile.id !== id); if (state.chatgpt!.activeProfileId === id) state.chatgpt!.activeProfileId = state.chatgpt!.profiles[0]?.id ?? null; return { state: structuredClone(state), message: null } })
+    window.electronAPI = { ai: { getState: vi.fn(async () => structuredClone(state)), chatgpt: { signIn, acknowledgeWelcome, manageUsage, resume, select, remove } } } as unknown as ElectronAPI
   })
   afterEach(cleanup)
   function Harness(): JSX.Element { const [value, setValue] = useState(state); return <ChatGPTAccountPanel state={value} accept={setValue} /> }
@@ -56,5 +58,44 @@ describe('subscription settings and consent UI', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry plan requests' }))
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
     expect(resume).toHaveBeenCalledTimes(1)
+  })
+  function accounts(): void {
+    state.chatgpt!.profiles = [{ id: 'one', label: 'Connection 1', email: 'same@example.com', name: null, connected: true, planEnabled: true, models: DEFAULT_CHATGPT_MODELS, offline: false }, { id: 'two', label: 'Connection 2', email: 'same@example.com', name: null, connected: false, planEnabled: false, models: DEFAULT_CHATGPT_MODELS, offline: true }]
+    state.chatgpt!.activeProfileId = 'two'
+  }
+  it('removes a signed-out account from the dropdown only after confirmation', async () => {
+    accounts(); render(<Harness />)
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
+    const dialog = screen.getByRole('dialog', { name: 'Remove saved ChatGPT account?' })
+    expect(within(dialog).getByText('Connection 2 · same@example.com')).toBeVisible()
+    expect(within(dialog).getByText(/does not delete your ChatGPT account or your recordings/)).toBeVisible()
+    expect(remove).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove account' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(remove).toHaveBeenCalledExactlyOnceWith('two', true)
+    expect(screen.getByLabelText('ChatGPT account')).toHaveValue('one')
+    expect(screen.queryByRole('option', { name: /Connection 2/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeVisible()
+  })
+  it('keeps the selected account when the removal popup is cancelled', () => {
+    accounts(); render(<Harness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    expect(remove).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('ChatGPT account')).toHaveValue('two')
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+  })
+  it('offers removal for connected accounts too and keeps the popup open on failure', async () => {
+    accounts(); state.chatgpt!.activeProfileId = 'one'
+    remove.mockRejectedValueOnce(new Error('Account storage is unavailable.'))
+    render(<Harness />)
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove account' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove account' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Account storage is unavailable.')
+    expect(screen.getByLabelText('ChatGPT account')).toHaveValue('one')
+    expect(within(dialog).getByRole('button', { name: 'Remove account' })).toBeEnabled()
   })
 })

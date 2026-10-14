@@ -9,6 +9,10 @@ import { getDataPath } from './config'
 import { hasConfirmedMpegHeader } from './audio-duration'
 
 const preparing = new Map<string, Promise<string>>()
+const waveforms = new Map<string, Promise<{ peaks: number[]; duration: number }>>()
+export async function waitForPlayback(id: string): Promise<void> {
+  await Promise.allSettled([...preparing.entries()].filter(([key]) => key.startsWith(id + '-')).map(([, task]) => task).concat(waveforms.has(id) ? [waveforms.get(id)!.then(() => '')] : []))
+}
 export async function preparePlayback(id: string): Promise<string> {
   const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id=?', [id])
   if (!recording?.file_path) throw new Error('This recording has not been downloaded.')
@@ -54,6 +58,13 @@ export async function convertAudioFile(source: string, key: string, folder: stri
   } finally { await unlink(extracted).catch(() => undefined); await unlink(staged).catch(() => undefined) }
 }
 export async function readWaveform(id: string): Promise<{ peaks: number[]; duration: number }> {
+  const existing = waveforms.get(id)
+  if (existing) return existing
+  const task = calculateWaveform(id)
+  waveforms.set(id, task)
+  try { return await task } finally { waveforms.delete(id) }
+}
+async function calculateWaveform(id: string): Promise<{ peaks: number[]; duration: number }> {
   const wav = await preparePlayback(id)
   const handle = await open(wav, 'r')
   const buffer = Buffer.alloc(1024)

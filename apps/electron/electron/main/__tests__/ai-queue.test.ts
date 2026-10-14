@@ -7,6 +7,7 @@ import type { BackendObserver, ProcessingResult } from '../ai/backend'
 import { ProcessingError } from '../ai/errors'
 import { ChatGPTPlanBlocked } from '../ai/chatgpt-protocol'
 import type { ChatGPTState } from '../../../src/shared/ai'
+import { saveTranscript } from '../ai/processing-store'
 
 const CLOUD_SETTINGS = { ...DEFAULT_AI_SETTINGS, transcription: { provider: 'gemini' as const, model: 'gemini-3.5-transcribe' } }
 
@@ -159,7 +160,7 @@ describe('persistent single-recording processing queue', () => {
     expect(getDetail(second).recording.queuePosition).toBe(1)
     releases[0](); await vi.advanceTimersByTimeAsync(1)
     releases[1](); await vi.advanceTimersByTimeAsync(1)
-    expect(q.state().queue).toEqual({ waiting: 0, active: null })
+    expect(q.state().queue).toEqual({ waiting: 0, waitingTranscriptions: 0, waitingSummaries: 0, reviewPaused: false, active: null })
   })
   it('recovers when reading settings during job preparation fails instead of leaving the active latch stuck', async () => {
     const id = recording(), runner = { run: vi.fn().mockResolvedValue({ ...result, summary: null }), stop: vi.fn().mockResolvedValue(undefined) }
@@ -194,5 +195,108 @@ describe('persistent single-recording processing queue', () => {
     queue = new TranscriptionQueue({ vault, settings: () => structuredClone(settings), dataPath: '/local', runner: { run: vi.fn(), stop: vi.fn().mockResolvedValue(undefined) }, changed: vi.fn(), activity: vi.fn() })
     queue.start()
     expect(getDetail(id).recording.status).toBe('failed')
+  })
+  it('resummarizes without a transcription key or local audio and never touches transcription settings', async () => {
+    const id = recording()
+    saveTranscript(id, result, DEFAULT_AI_SETTINGS)
+    run("UPDATE recordings SET file_path=NULL,verified=0,status='done' WHERE id=?", [id])
+    vault.saveVerified('gemini', 'AQ.fake-key', DEFAULT_MODELS.gemini)
+    const runner = { run: vi.fn().mockResolvedValue({ ...result, transcriptChanged: false }), stop: vi.fn().mockResolvedValue(undefined) }
+    queue = new TranscriptionQueue({ vault, settings: () => ({ ...CLOUD_SETTINGS, transcription: { provider: 'openai', model: 'whisper-1' } }), dataPath: '/local', runner, changed: vi.fn(), activity: vi.fn() })
+    expect(queue.state().ready).toBe(false)
+    queue.reprocess(id, 'summarize'); await vi.advanceTimersByTimeAsync(1)
+    expect(runner.run.mock.calls[0][0]).toMatchObject({ savedTranscript: { segments: [{ text: 'I will send the plan.' }] }, keys: { gemini: 'AQ.fake-key', openai: null }, profiles: [] })
+    expect(getDetail(id).recording.status).toBe('done')
+    expect(queryOne('SELECT provider,model FROM transcripts WHERE recording_id=?', [id])).toEqual({ provider: 'local', model: DEFAULT_AI_SETTINGS.transcription.model })
+  })
+  it('persists a fresh retranscription generation across retries and rejects duplicate regeneration', async () => {
+    const id = recording()
+    const runner = { run: vi.fn().mockRejectedValueOnce(new ProcessingError('Transient error.', true)).mockResolvedValue(result), stop: vi.fn().mockResolvedValue(undefined) }
+    const q = create(runner)
+    q.reprocess(id, 'transcribe')
+    expect(() => q.reprocess(id, 'transcribe')).toThrow('already processing')
+    const generation = queryOne<{ generation: string }>('SELECT generation FROM transcription_jobs')!.generation
+    expect(generation).toMatch(/^[\da-f-]{36}$/)
+    await vi.advanceTimersByTimeAsync(1); await vi.advanceTimersByTimeAsync(10000)
+    expect(runner.run.mock.calls.map(call => call[0].generation)).toEqual([generation, generation])
+    expect(getDetail(id).recording.summary).toBe('Send the plan.')
+    q.reprocess(id, 'transcribe')
+    expect(queryOne<{ generation: string }>('SELECT generation FROM transcription_jobs')!.generation).not.toBe(generation)
+  })
+  it('keeps the previous notes available when regeneration fails', async () => {
+    const id = recording()
+    saveTranscript(id, result, DEFAULT_AI_SETTINGS)
+    run("INSERT INTO summaries(id,recording_id,text) VALUES ('existing',?,'Last good summary')", [id])
+    const q = create({ run: vi.fn().mockRejectedValue(new ProcessingError('Provider unavailable.')), stop: vi.fn().mockResolvedValue(undefined) })
+    q.reprocess(id, 'summarize')
+    expect(getDetail(id).recording.summary).toBe('Last good summary')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(getDetail(id).recording).toMatchObject({ status: 'failed', summary: 'Last good summary' })
+    expect(getDetail(id).segments).toHaveLength(1)
+  })
+  it('does not queue a retranscription without a configured summary provider', () => {
+    const id = recording()
+    queue = new TranscriptionQueue({ vault, settings: () => DEFAULT_AI_SETTINGS, dataPath: '/local', runner: { run: vi.fn(), stop: vi.fn().mockResolvedValue(undefined) }, changed: vi.fn(), activity: vi.fn() })
+    expect(() => queue!.reprocess(id, 'transcribe')).toThrow('summaries')
+    expect(getDetail(id).recording.status).toBe('downloaded')
+  })
+  it('recovers an interrupted retranscription with the same persisted generation after restart', () => {
+    const id = recording()
+    run("INSERT INTO transcription_jobs(id,recording_id,stage,attempt,created_at,mode,generation) VALUES ('job',?,'transcribing',2,'2026-10-07T10:00:00Z','transcribe','saved-generation')", [id])
+    const q = create({ run: vi.fn(), stop: vi.fn().mockResolvedValue(undefined) }, false)
+    q.start()
+    expect(queryOne('SELECT stage,attempt,mode,generation FROM transcription_jobs')).toEqual({ stage: 'queued', attempt: 1, mode: 'transcribe', generation: 'saved-generation' })
+  })
+  it('ignores late worker callbacks while deleting the active recording and starts other jobs afterwards', async () => {
+    const first = recording(), second = recording(1)
+    let callbacks: BackendObserver | undefined, finish: (() => void) | undefined
+    const runner = { run: vi.fn((_input, observer: BackendObserver) => { callbacks = observer; return new Promise<ProcessingResult>(resolve => { finish = () => resolve(result) }) }), stop: vi.fn(async () => finish?.()) }
+    const q = create(runner)
+    q.enqueue(first); q.enqueue(second); await vi.advanceTimersByTimeAsync(1)
+    const old = callbacks!
+    await q.withRecordingPaused(first, async () => {
+      old.stage('summarizing', 1, 'stale message'); old.checkpoint(result)
+      expect(queryOne('SELECT id FROM segments WHERE recording_id=?', [first])).toBeUndefined()
+      run('DELETE FROM recordings WHERE id=?', [first])
+    })
+    old.checkpoint(result)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runner.run).toHaveBeenCalledTimes(2)
+    expect(queryOne('SELECT id FROM recordings WHERE id=?', [first])).toBeUndefined()
+  })
+  it('opens a local review session without starting any existing or newly requested AI work', async () => {
+    const id = recording(), runner = { run: vi.fn(), stop: vi.fn().mockResolvedValue(undefined) }
+    run("INSERT INTO transcription_jobs(id,recording_id,stage,created_at) VALUES ('pending',?,'queued','2026-10-07T10:00:00Z')", [id])
+    queue = new TranscriptionQueue({ vault, settings: () => DEFAULT_AI_SETTINGS, dataPath: '/local', runner, reviewMode: true, changed: vi.fn(), activity: vi.fn() })
+    queue.start(); queue.kick(); await vi.advanceTimersByTimeAsync(10000)
+    expect(runner.run).not.toHaveBeenCalled()
+    expect(queue.state()).toMatchObject({ ready: false, summaryReady: false, reason: 'Background processing is paused. Resume processing to continue.' })
+    expect(() => queue!.enqueue(id, true)).toThrow('paused')
+    expect(() => queue!.reprocess(id, 'summarize')).toThrow('paused')
+    expect(getDetail(id).recording.hasAudio).toBe(true)
+  })
+  it('resumes a review session only after confirmed consent and then starts pending jobs', async () => {
+    const id = recording(), runner = { run: vi.fn(async () => result), stop: vi.fn(async () => undefined) }
+    queue = new TranscriptionQueue({ vault, settings: () => DEFAULT_AI_SETTINGS, dataPath: '/local', runner, reviewMode: true, changed: vi.fn(), activity: vi.fn() })
+    run("INSERT INTO transcription_jobs(id,recording_id,stage,created_at) VALUES ('pending',?,'queued','2026-10-07T10:00:00Z')", [id])
+    queue.start()
+    expect(() => queue!.resumeReview(false)).toThrow('Confirm')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runner.run).not.toHaveBeenCalled()
+    queue.resumeReview(true); await vi.advanceTimersByTimeAsync(1)
+    expect(runner.run).toHaveBeenCalledOnce()
+    expect(queue.state().queue?.reviewPaused).toBe(false)
+  })
+  it('distinguishes queued summary jobs and cancels them without discarding results or other jobs', () => {
+    const first = recording(), second = recording(1), q = create({ run: vi.fn(), stop: vi.fn(async () => undefined) }, false)
+    saveTranscript(first, result, DEFAULT_AI_SETTINGS)
+    run("INSERT INTO summaries(id,recording_id,text) VALUES ('saved',?,'Saved notes')", [first])
+    run("INSERT INTO transcription_jobs(id,recording_id,stage,created_at,mode) VALUES ('summary-job',?,'queued','2026-10-07T10:00:00Z','summarize'),('audio-job',?,'queued','2026-10-07T10:00:00Z','process')", [first, second])
+    expect(q.state().queue).toMatchObject({ waiting: 2, waitingSummaries: 1, waitingTranscriptions: 1, active: null })
+    expect(q.cancelQueuedSummaries()).toBe(1)
+    expect(getDetail(first).recording).toMatchObject({ status: 'done', summary: 'Saved notes' })
+    expect(getDetail(first).segments).toHaveLength(1)
+    expect(queryOne("SELECT stage FROM transcription_jobs WHERE id='audio-job'")).toEqual({ stage: 'queued' })
+    expect(q.cancelQueuedSummaries()).toBe(0)
   })
 })

@@ -23,6 +23,17 @@ export class ChatGPTStore {
     if (!this.row(id)) throw new ProcessingError('Choose an existing ChatGPT account.')
     run("INSERT OR REPLACE INTO settings(key,value) VALUES ('chatgpt-active-profile',?)", [id])
   }
+  remove(id: string, now = Date.now()): void {
+    if (!this.row(id)) throw new ProcessingError('This ChatGPT account was not found.')
+    runInTransaction(() => {
+      run('DELETE FROM chatgpt_profiles WHERE id=?', [id])
+      if (this.activeId() !== id) return
+      const remaining = this.profiles(now)
+      const replacement = remaining.find(profile => profile.planEnabled) ?? remaining.find(profile => profile.connected) ?? remaining[0]
+      if (replacement) this.select(replacement.id)
+      else run("DELETE FROM settings WHERE key='chatgpt-active-profile'")
+    })
+  }
   registration(id: string): ChatGPTRegistration {
     const row = this.row(id)
     if (!row) throw new ProcessingError('This ChatGPT account was not found. Add an account in Settings.')

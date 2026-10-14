@@ -22,6 +22,14 @@ declare module 'sherpa-onnx-node' {
     compute(stream: EmbeddingStream, enableExternalBuffer?: boolean): Float32Array
   }
   export function readWave(path: string, enableExternalBuffer?: boolean): { samples: Float32Array; sampleRate: number }
-  const native: { OfflineRecognizer: typeof OfflineRecognizer; OfflineSpeakerDiarization: typeof OfflineSpeakerDiarization; SpeakerEmbeddingExtractor: typeof SpeakerEmbeddingExtractor; readWave: typeof readWave }
+  export class Vad {
+    constructor(config: { sileroVad: { model: string; threshold: number; minSilenceDuration: number; minSpeechDuration: number; windowSize: number; maxSpeechDuration: number }; sampleRate: number; numThreads: number; provider: 'cpu'; debug: boolean }, bufferSizeInSeconds: number)
+    acceptWaveform(samples: Float32Array): void
+    isEmpty(): boolean
+    front(enableExternalBuffer?: boolean): { start: number; samples: Float32Array }
+    pop(): void
+    flush(): void
+  }
+  const native: { Vad: typeof Vad; OfflineRecognizer: typeof OfflineRecognizer; OfflineSpeakerDiarization: typeof OfflineSpeakerDiarization; SpeakerEmbeddingExtractor: typeof SpeakerEmbeddingExtractor; readWave: typeof readWave }
   export default native
 }

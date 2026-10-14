@@ -144,6 +144,19 @@ export class ChatGPTAuth {
       return warning
     } finally { this.signingOut.delete(id); if (!this.closed) this.dependencies.changed() }
   }
+  async remove(id: string): Promise<string | null> {
+    if (this.closed) throw new ProcessingError('HiDockNotes is closing.')
+    // Sign-out drains token rotation and cancels this connection's requests
+    // before its encrypted credentials and registration are removed.
+    const warning = await this.signOut(id)
+    if (this.closed) throw new ProcessingError('HiDockNotes is closing. Retry removing the account after reopening.')
+    this.dependencies.store.remove(id, this.now())
+    this.sessionControllers.delete(id)
+    this.revoked.delete(id)
+    this.error = warning
+    this.dependencies.changed()
+    return warning
+  }
   close(): void {
     this.closed = true
     for (const controller of this.sessionControllers.values()) controller.abort()

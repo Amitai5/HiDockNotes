@@ -481,7 +481,8 @@ export class JensenDevice {
   data: Record<string, unknown> = {}
 
   // === Event callbacks ===
-  ondisconnect?: () => void
+  /** Cleanup also runs before connecting; only 'physical' means the recorder was unplugged. */
+  ondisconnect?: (reason?: 'cleanup' | 'physical') => void
   onconnect?: () => void
   /**
    * A download went silent for the stall window and the connection is about to be
@@ -1045,7 +1046,7 @@ export class JensenDevice {
     }
     this.pendingPromises.clear()
 
-    this.ondisconnect?.()
+    this.ondisconnect?.('cleanup')
   }
 
   /**
@@ -1176,7 +1177,7 @@ export class JensenDevice {
     }
     this.pendingPromises.clear()
 
-    this.ondisconnect?.()
+    this.ondisconnect?.('physical')
   }
 
   private setupUsbDisconnectListener(): void {

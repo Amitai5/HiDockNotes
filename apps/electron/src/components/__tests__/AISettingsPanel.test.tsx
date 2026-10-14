@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { AISettingsPanel } from '../AISettingsPanel'
 import type { ElectronAPI } from '../../shared/contracts'
 import type { AISettings, AIState } from '../../shared/ai'
@@ -52,5 +52,18 @@ describe('AI provider setup', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('rejected this key')
     expect(screen.queryByText('Verified')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Gemini API key')).toHaveValue('')
+  })
+  it('offers provider confirmation to resume processing directly from transcription settings', async () => {
+    state.queue = { waiting: 1, active: null, reviewPaused: true }
+    window.electronAPI.ai.resumeReview = vi.fn(async () => { state.ready = true; state.reason = null; state.queue!.reviewPaused = false; return structuredClone(state) })
+    render(<AISettingsPanel sections={['transcription']} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume processing' }))
+    const dialog = screen.getByRole('dialog', { name: 'Resume background processing?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Resume processing' }))
+    await waitFor(() => expect(window.electronAPI.ai.resumeReview).toHaveBeenCalledExactlyOnceWith(true))
+    expect(await screen.findByText(/Ready. New verified downloads/)).toBeVisible()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Resume processing' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Process saved recordings' })).toBeEnabled()
   })
 })

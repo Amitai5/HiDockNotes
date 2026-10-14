@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest'
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -11,7 +12,7 @@ const entry = { id: 'entry', timestamp: '2026-10-07T10:00:00Z', type: 'info' as 
 beforeEach(() => {
   clearAllActivityBuffers()
   useAppStore.setState({ activityOpen: true })
-  window.electronAPI = { activity: { clear: vi.fn().mockResolvedValue(undefined) } } as unknown as Window['electronAPI']
+  window.electronAPI = { activity: { clear: vi.fn().mockResolvedValue(undefined) }, devicePipeline: { getState: vi.fn(async () => ({ phase: 'idle', error: null })), onState: vi.fn(() => vi.fn()) }, ai: { getState: vi.fn(async () => ({ queue: { waiting: 2, waitingSummaries: 2, waitingTranscriptions: 0, reviewPaused: true, active: null } })) }, library: { onChanged: vi.fn(() => vi.fn()) } } as unknown as Window['electronAPI']
 })
 afterEach(cleanup)
 describe('Activity Log safety and interaction', () => {
@@ -44,5 +45,12 @@ describe('Activity Log safety and interaction', () => {
     render(<ActivityLog />)
     fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(useAppStore.getState().activityOpen).toBe(false))
+  })
+  it('shows current recorder and paused summary status even when the historical log is empty', async () => {
+    render(<ActivityLog />)
+    expect(await screen.findByText('Recorder ready')).toBeVisible()
+    expect(screen.getByText(/2 summary refreshes waiting/)).toBeVisible()
+    expect(screen.getByText('No logged events')).toBeVisible()
+    expect(screen.queryByText('All clear')).toBeNull()
   })
 })

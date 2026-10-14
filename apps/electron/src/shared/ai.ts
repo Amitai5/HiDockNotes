@@ -19,9 +19,9 @@ export interface AISettings {
 export interface ProviderState { provider: ProviderId; configured: boolean; verified: boolean; verifiedAt: string | null; models: ModelChoice[]; offline: boolean }
 export interface ChatGPTProfileView { id: string; label: string; email: string | null; name: string | null; connected: boolean; planEnabled: boolean; models: ModelChoice[]; offline: boolean }
 export interface ChatGPTState { profiles: ChatGPTProfileView[]; activeProfileId: string | null; connected: boolean; planEnabled: boolean; signingIn: boolean; error: string | null; welcomePending: boolean; models: ModelChoice[]; offline: boolean; usageBlocked: boolean }
-export interface TranscriptionQueueView { waiting: number; active: { id: string; title: string; stage: RecordingStatus; progress: number; message: string | null; startedAt: string | null } | null }
+export interface TranscriptionQueueView { waiting: number; waitingTranscriptions?: number; waitingSummaries?: number; reviewPaused?: boolean; active: { id: string; title: string; stage: RecordingStatus; mode?: 'process' | 'summarize' | 'transcribe'; progress: number; message: string | null; startedAt: string | null } | null }
 export interface AIState { settings: AISettings; providers: ProviderState[]; ready: boolean; reason: string | null; chatgpt?: ChatGPTState; summaryReady?: boolean; summaryReason?: string | null; queue?: TranscriptionQueueView }
-export interface ProcessingView { stage: RecordingStatus; progress: number; message: string | null; error: string | null; attempt: number; nextAttemptAt: string | null }
+export interface ProcessingView { stage: RecordingStatus; progress: number; message: string | null; error: string | null; attempt: number; nextAttemptAt: string | null; mode?: 'process' | 'summarize' | 'transcribe' }
 export interface SpeakerView { id: string; label: string; profileId: string | null; suggestedProfileId: string | null; suggestedName: string | null; score: number | null; canRemember: boolean }
 export interface VoiceSampleView { id: string; recordingId: string | null; recordingTitle: string | null; createdAt: string }
 export interface VoiceProfileView { id: string; name: string; samples: VoiceSampleView[] }

@@ -21,4 +21,11 @@ describe('transcript exports', () => {
     expect(output).not.toContain('## Transcript')
     expect(output).not.toContain('Dana: Send the plan.')
   })
+  it('includes the meeting overview and organizer in summary-only notes without adding the transcript', () => {
+    const output = exportTranscript({ ...detail, meeting: { meetingType: 'Planning', participants: [{ speakerId: null, name: 'Dana Lee', organizer: true }] }, tags: ['planning', 'operations', 'meeting'] }, 'md', 'summary')
+    expect(output).toContain('Meeting type: Planning')
+    expect(output).toContain('Participants: Dana Lee (Organizer)')
+    expect(output).toContain('Tags: planning, operations, meeting')
+    expect(output).not.toContain('## Transcript')
+  })
 })
