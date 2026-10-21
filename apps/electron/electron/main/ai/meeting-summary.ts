@@ -2,15 +2,16 @@ import type { AISettings } from '../../../src/shared/ai'
 import type { TranscriptSegment } from '../../../src/shared/contracts'
 import type { ChatProvider, SummaryResult } from './providers'
 import { renderSummaryActions } from './summary-metadata'
+import type { ReferenceContextSnapshot } from '../../../src/shared/reference-context'
 
-export async function summarizeMeeting(chat: ChatProvider, model: string, segments: TranscriptSegment[], settings: AISettings, recordedAt: string | undefined, stage: (progress: number, message: string) => void, signal?: AbortSignal): Promise<SummaryResult> {
+export async function summarizeMeeting(chat: ChatProvider, model: string, segments: TranscriptSegment[], settings: AISettings, recordedAt: string | undefined, stage: (progress: number, message: string) => void, signal?: AbortSignal, referenceContext?: ReferenceContextSnapshot): Promise<SummaryResult> {
   const parts: TranscriptSegment[][] = [[]]
   let characters = 0
   for (const segment of segments) {
     if (characters + segment.text.length > 60000 && parts[parts.length - 1].length) { parts.push([]); characters = 0 }
     parts[parts.length - 1].push(segment); characters += segment.text.length + 120
   }
-  const context = { recordedAt, evidenceSegments: segments }
+  const context = { recordedAt, evidenceSegments: segments, referenceContext }
   const summaries: SummaryResult[] = []
   for (const [index, part] of parts.entries()) {
     signal?.throwIfAborted(); stage(index / parts.length, `Summarizing part ${index + 1} of ${parts.length}…`)

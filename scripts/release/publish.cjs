@@ -4,6 +4,7 @@ const { execFileSync } = require('node:child_process')
 const { root, readVersion } = require('./version.cjs')
 const { githubClient, tagCommit, git, findRelease } = require('./github.cjs')
 const { verifyArtifacts, checksum } = require('./artifacts.cjs')
+const { signManifest } = require('./signing.cjs')
 
 function verifyUploadedAssets(assets, expected) {
   if (assets.length !== expected.length) { throw new Error('GitHub release has an unexpected set of assets; the draft will remain unpublished.') }
@@ -24,7 +25,15 @@ async function main() {
   let release = await findRelease(api, tag)
   if (release && !release.draft) { console.log(`${tag} is already published.`); return }
   const directory = path.join(root, 'release', 'ci-assets')
-  const installers = await verifyArtifacts(directory, version)
+  const signed = process.env.HIDOCKNOTES_SIGNED_RELEASE === 'true'
+  const installers = await verifyArtifacts(directory, version, signed)
+  if (signed) {
+    const result = signManifest({ format: 1, version, commit, artifacts: installers })
+    for (const [name, bytes] of [['updates.json', result.bytes], ['updates.json.sig', result.signature]]) {
+      const file = path.join(directory, name); fs.writeFileSync(file, bytes)
+      installers.push({ name, size: bytes.length, sha256: await checksum(file) })
+    }
+  }
   const checksums = path.join(directory, 'SHA256SUMS.txt')
   fs.writeFileSync(checksums, installers.map(file => `${file.sha256}  ${file.name}\n`).join(''))
   const expected = [...installers, { name: 'SHA256SUMS.txt', size: fs.statSync(checksums).size, sha256: await checksum(checksums) }]
@@ -33,7 +42,7 @@ async function main() {
   if (!existingCommit) { await api('git/refs', 'POST', { ref: `refs/tags/${tag}`, sha: commit }) }
 
   const notes = path.join(root, 'release', 'release-notes.md')
-  fs.writeFileSync(notes, `## Installers\n\n| Platform | Download |\n| --- | --- |\n| Windows (x64) | \`HiDockNotes-${version}-windows-x64-setup.exe\` |\n| Linux (x64) | \`HiDockNotes-${version}-linux-x64.AppImage\` or \`HiDockNotes-${version}-linux-x64.deb\` |\n| macOS (Intel) | \`HiDockNotes-${version}-macos-x64.dmg\` |\n| macOS (Apple Silicon) | \`HiDockNotes-${version}-macos-arm64.dmg\` |\n\nInstallers are built on native GitHub runners. SHA256SUMS.txt verifies all five downloads. Windows installers are unsigned; macOS apps are ad-hoc signed and not notarized, so operating-system security prompts may appear.\n\nOn Linux, make the AppImage executable before opening it, or install the Debian package with your package manager. Local speech models download when first needed.\n\nSource: [${commit}](${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}/tree/${commit}). App and bundled third-party licenses are included.\n`)
+  fs.writeFileSync(notes, `## Installers\n\n| Platform | Download |\n| --- | --- |\n| Windows (x64) | \`HiDockNotes-${version}-windows-x64-setup.exe\` |\n| Linux (x64) | \`HiDockNotes-${version}-linux-x64.AppImage\` or \`HiDockNotes-${version}-linux-x64.deb\` |\n| macOS (Intel) | \`HiDockNotes-${version}-macos-x64.dmg\` |\n| macOS (Apple Silicon) | \`HiDockNotes-${version}-macos-arm64.dmg\` |\n\nInstallers are built on native GitHub runners. SHA256SUMS.txt verifies the published installers and update assets. ${signed ? 'Windows installers are Authenticode signed; macOS apps are Developer ID signed and notarized. Linux downloads and update feeds are covered by the Ed25519-signed updates.json manifest. In-app updates verify the release and create a library safety backup before installation.' : 'Signing credentials are not configured for this build. Windows installers are unsigned; macOS apps are ad-hoc signed and not notarized. Use the manual installers; in-app installation is disabled.'}\n\nOn Linux, make the AppImage executable before opening it, or install the Debian package with your package manager. Local speech models download when first needed.\n\nSource: [${commit}](${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}/tree/${commit}). App and bundled third-party licenses are included.\n`)
   const gh = (...args) => execFileSync('gh', [...args, '--repo', process.env.GITHUB_REPOSITORY], { stdio: 'inherit' })
   const prerelease = version.includes('-')
   if (!release) {
@@ -45,7 +54,7 @@ async function main() {
   verifyUploadedAssets(assets, expected)
   const published = await api(`releases/${release.id}`, 'PATCH', { draft: false, prerelease, make_latest: prerelease ? 'false' : 'legacy' })
   console.log(`Published ${published.html_url}`)
-  if (process.env.GITHUB_STEP_SUMMARY) { fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Published [HiDockNotes ${version}](${published.html_url}) with five installers and SHA-256 checksums.\n`) }
+  if (process.env.GITHUB_STEP_SUMMARY) { fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Published [HiDockNotes ${version}](${published.html_url}) with platform installers, update assets and SHA-256 checksums.\n`) }
 }
 
 if (require.main === module) { main().catch(error => { console.error(error.message); process.exitCode = 1 }) }

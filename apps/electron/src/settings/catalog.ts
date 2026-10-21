@@ -11,6 +11,7 @@ interface SettingSearchEntry { id: string; tab: SettingsTab; title: string; desc
 export const SETTINGS_CATALOG: readonly SettingSearchEntry[] = [
   { id: 'your-name', tab: 'general', title: 'Your name', description: 'Your name, saved on this computer.', keywords: 'profile display name' },
   { id: 'appearance', tab: 'general', title: 'Appearance', description: 'Choose light, dark, or system theme.', keywords: 'theme light dark mode color system' },
+  { id: 'global-context', tab: 'general', title: 'Global context & terminology', description: 'Background, people, organizations, acronyms, and preferred spellings shared across projects.', keywords: 'reference knowledge glossary global context project background terminology people participant client organization product acronym spelling assistant summary' },
   { id: 'ai-providers', tab: 'ai', title: 'AI providers & API keys', description: 'Verify Gemini or OpenAI and choose independent models.', keywords: 'google gemini openai AQ AIza api key models cloud billing privacy' },
   { id: 'ai-providers', tab: 'ai', title: 'ChatGPT subscription', description: 'Sign in, switch or remove saved accounts, and manage plan usage.', keywords: 'codex chatgpt login account subscription plan usage limits sign in sign out delete remove connection' },
   { id: 'ai-providers', tab: 'ai', title: 'Transcription provider & model', description: 'Local Whisper, Gemini, or OpenAI for audio.', keywords: 'whisper base small local offline cpu speed accuracy transcription model' },
@@ -22,9 +23,10 @@ export const SETTINGS_CATALOG: readonly SettingSearchEntry[] = [
   { id: 'voice-thresholds', tab: 'voices', title: 'Voice recognition thresholds', description: 'Adjust suggestion and automatic matching confidence.', keywords: 'suggest threshold similarity cosine auto assign confidence voice speaker' },
   { id: 'device-preferences', tab: 'device', title: 'Device preferences', description: 'Automatic connection and downloads for your recorder.', keywords: 'device connect auto download sync usb recorder' },
   { id: 'storage', tab: 'device', title: 'Storage location', description: 'Choose where new audio recordings are saved.', keywords: 'storage folder file path recordings disk audio location' },
-  { id: 'backup', tab: 'device', title: 'Library backup', description: 'Download all audio and metadata, including voices, tags and action items.', keywords: 'backup export archive download recordings metadata database voice profiles samples tags actions restore' },
+  { id: 'backup', tab: 'device', title: 'Library backup & restore', description: 'Save or restore all audio and metadata, including voices, tags and action items.', keywords: 'backup restore import export archive download recordings metadata database voice profiles samples tags actions recover recovery' },
   { id: 'agent-connections', tab: 'agents', title: 'MCP agent connections', description: 'Connect Codex, Claude Code, or another MCP client.', keywords: 'mcp agent harness codex claude code tools connection stdio automation' },
-  { id: 'about', tab: 'about', title: 'About & licenses', description: 'App version, platform, and third-party notices.', keywords: 'about version update electron platform license MIT copyright' }
+  { id: 'updates', tab: 'about', title: 'Application updates', description: 'Check releases, read changes, and back up before installing a verified update.', keywords: 'version updates upgrade installer signing signature windows mac linux release notes install download' },
+  { id: 'about', tab: 'about', title: 'About & licenses', description: 'App version, platform, and third-party notices.', keywords: 'about version electron platform license MIT copyright' }
 ]
 export function searchSettings(query: string): readonly SettingSearchEntry[] {
   const terms = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean)

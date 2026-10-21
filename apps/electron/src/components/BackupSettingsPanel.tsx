@@ -3,6 +3,7 @@ import { Archive, CheckCircle2, Download, FolderOpen, LoaderCircle } from 'lucid
 import { EMPTY_BACKUP_STATE, type BackupState } from '../shared/backup'
 import { Button, formatBytes } from './ui'
 import { reportError } from '../store/useAppStore'
+import { RestoreSettingsPanel } from './RestoreSettingsPanel'
 
 export function BackupSettingsPanel(): JSX.Element {
   const [state, setState] = useState<BackupState>(EMPTY_BACKUP_STATE)
@@ -31,6 +32,7 @@ export function BackupSettingsPanel(): JSX.Element {
       {state.phase === 'cancelled' && <p role="status" className="muted">Backup cancelled. No incomplete archive was kept.</p>}
       {state.phase === 'failed' && <p role="alert" className="danger">Backup could not be saved. {state.error}</p>}
     </div>
-    <p className="privacy-note">The archive contains private audio and notes; keep it somewhere you trust. API keys stay encrypted and require signing in again on another computer. Models, caches and incomplete downloads are excluded. Audio only on a disconnected recorder cannot be included. Automatic restore is not available yet.</p>
+    <RestoreSettingsPanel backupBusy={active || choosing} />
+    <p className="privacy-note">The archive contains private audio and notes; keep it somewhere you trust. API keys stay encrypted and require signing in again after a restore. Models, caches and incomplete downloads are excluded. Audio only on a disconnected recorder cannot be included.</p>
   </section>
 }

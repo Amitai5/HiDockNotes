@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readAudioDuration } from './audio-duration'
@@ -66,8 +66,35 @@ const migrations = [
    ALTER TABLE transcription_jobs ADD COLUMN generation TEXT;`,
   `ALTER TABLE recording_overviews ADD COLUMN expected_speakers INTEGER CHECK(expected_speakers BETWEEN 1 AND 10);
    CREATE TABLE recording_deletions (recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE, device_done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);`,
-  `CREATE TABLE transcript_artifacts (segment_id TEXT PRIMARY KEY, recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL, speaker_id TEXT, reason TEXT NOT NULL, removed_at TEXT NOT NULL);`
+  `CREATE TABLE transcript_artifacts (segment_id TEXT PRIMARY KEY, recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL, speaker_id TEXT, reason TEXT NOT NULL, removed_at TEXT NOT NULL);`,
+  `CREATE TABLE transcript_revisions (version INTEGER PRIMARY KEY AUTOINCREMENT, recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, created_at TEXT NOT NULL, reason TEXT NOT NULL, segment_count INTEGER NOT NULL, segments TEXT NOT NULL, corrections TEXT NOT NULL DEFAULT '[]');
+   CREATE INDEX transcript_revisions_recording ON transcript_revisions(recording_id, version);
+   CREATE TABLE transcript_corrections (recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, segment_id TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL, PRIMARY KEY(recording_id,segment_id));
+   CREATE TABLE transcript_candidates (recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE, created_at TEXT NOT NULL, checkpoint TEXT NOT NULL, settings TEXT NOT NULL);
+   ALTER TABLE recording_overviews ADD COLUMN summary_version INTEGER NOT NULL DEFAULT 0;`
 ]
+
+export const DATABASE_SCHEMA_VERSION = migrations.length
+/** Keeps an untouched SQLite recovery point before a manual install migrates metadata. */
+export async function backupBeforeDatabaseMigration(filePath: string): Promise<void> {
+  if (!existsSync(filePath)) return
+  const database = new Database(filePath, { readonly: true, fileMustExist: true })
+  try {
+    const version = Number(database.pragma('user_version', { simple: true }))
+    if (version > 0 && version < DATABASE_SCHEMA_VERSION) await database.backup(filePath + `.before-schema-${DATABASE_SCHEMA_VERSION}-${randomUUID()}.db`)
+  } finally { database.close() }
+}
+/** Refuses executable/schema additions in imported SQLite files before using them. */
+export function validateDatabaseSchema(database: Database.Database): void {
+  const version = Number(database.pragma('user_version', { simple: true }))
+  if (!Number.isInteger(version) || version < 1 || version > migrations.length) throw new Error('This backup needs a different application version.')
+  const reference = new Database(':memory:')
+  try {
+    for (const migration of migrations.slice(0, version)) reference.exec(migration)
+    const schema = (db: Database.Database): string => JSON.stringify(db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all())
+    if (schema(database) !== schema(reference)) throw new Error('The backup database schema is not recognized.')
+  } finally { reference.close() }
+}
 
 export function initializeDatabase(filePath: string): void {
   mkdirSync(dirname(filePath), { recursive: true })

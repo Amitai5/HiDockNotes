@@ -20,12 +20,14 @@ import { validateText, validateBoolean, validateId } from './jensen-validation'
 import { libraryNavigation } from '../services/database'
 import type { AppSettings } from '../../../src/shared/contracts'
 import { registerClipboardHandler } from './clipboard-handlers'
+import { registerReferenceContextHandlers } from './reference-context-handlers'
 
 export function readSettings(): AppSettings { return getSettings(join(getDataPath(), 'recordings')) }
 export function libraryChanged(): void { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('library:changed') }
 const changed = libraryChanged
 export function registerAppHandlers(window: BrowserWindow): void {
   registerClipboardHandler()
+  registerReferenceContextHandlers(changed)
   listen('window:minimize', () => window.minimize())
   listen('window:maximize', () => window.isMaximized() ? window.unmaximize() : window.maximize())
   listen('window:close', () => window.close())

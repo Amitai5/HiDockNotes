@@ -118,7 +118,7 @@ describe('recording processing results in the Library', () => {
     await waitFor(() => expect(window.electronAPI.ai.reprocess).toHaveBeenCalledWith('recording', 'summarize'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     fireEvent.click(trigger); fireEvent.click(screen.getByRole('menuitem', { name: 'Retranscribe' }))
-    expect(screen.getByText(/A new summary, participants, tags and action items will follow automatically/)).toBeVisible()
+    expect(screen.getByText(/A new summary, participants, tags and action items follow automatically after you apply it/)).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Retranscribe and summarize' }))
     await waitFor(() => expect(window.electronAPI.ai.reprocess).toHaveBeenCalledWith('recording', 'transcribe'))
   })

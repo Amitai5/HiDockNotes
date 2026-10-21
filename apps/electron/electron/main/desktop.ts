@@ -1,8 +1,8 @@
-import { app, BrowserWindow, Menu, protocol, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, protocol, safeStorage, shell } from 'electron'
 import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 import product from '../../product.json'
-import { initializeDatabase, closeDatabase } from './services/database'
+import { initializeDatabase, closeDatabase, backupBeforeDatabaseMigration } from './services/database'
 import { configureSettingsReader } from './services/config'
 import { initializeFileStorage } from './services/file-storage'
 import { getDevicePipelineService } from './services/device-pipeline-instance'
@@ -19,7 +19,7 @@ import { ChatGPTAuth } from './ai/chatgpt-auth'
 import { ChatGPTStore } from './ai/chatgpt-store'
 import type { ProviderFactory } from './ai/providers'
 import { recordingEvents } from './services/recording-events'
-import { setIpcOwner } from './ipc/trusted-ipc'
+import { setIpcOwner, beginMaintenance } from './ipc/trusted-ipc'
 import { registerMediaProtocol } from './services/media-protocol'
 import { startRecordingPoll, stopRecordingPoll } from './ipc/jensen-handlers'
 import { registerTruncatedRecoveryHandlers } from './ipc/truncated-recovery-handlers'
@@ -37,6 +37,10 @@ import { repairFragmentedSpeakers } from './ai/speaker-repair'
 import { repairSavedDecoderArtifacts } from './ai/transcript-repair'
 import { registerBackupHandlers } from './ipc/backup-handlers'
 import type { LibraryBackupService } from './services/library-backup'
+import { LibraryRestoreService, applyPendingRestore } from './services/library-restore'
+import { registerRestoreHandlers, type MaintenanceRequest } from './ipc/restore-handlers'
+import { registerTranscriptHandlers } from './ipc/transcript-handlers'
+import { registerUpdateHandlers } from './ipc/update-handlers'
 
 app.setName(product.name)
 app.setAppUserModelId(product.appId)
@@ -49,6 +53,14 @@ let chatgptAuth: ChatGPTAuth | undefined
 let agentAccess: AgentAccessController | undefined
 let recordingDeletion: RecordingDeletionService | undefined
 let libraryBackup: LibraryBackupService | undefined
+let libraryRestore: LibraryRestoreService | undefined
+let maintenanceAction: (() => Promise<void>) | undefined
+let maintenanceFinish: (() => void) | undefined
+const requestMaintenance: MaintenanceRequest = (action, finish) => {
+  if (shuttingDown || maintenanceAction) throw new Error('The application is already preparing to restart.')
+  beginMaintenance('The application is preparing a safety backup and restart.')
+  maintenanceAction = action; maintenanceFinish = finish; app.quit()
+}
 const ownsInstance = app.requestSingleInstanceLock()
 if (!ownsInstance) app.quit()
 app.on('second-instance', () => {
@@ -58,7 +70,10 @@ app.on('second-instance', () => {
 })
 
 async function createWindow(): Promise<void> {
+  const restored = applyPendingRestore(app.getPath('userData'))
+  await backupBeforeDatabaseMigration(join(app.getPath('userData'), 'data', 'library.db'))
   initializeDatabase(join(app.getPath('userData'), 'data', 'library.db'))
+  if (restored) emitActivityLog('success', 'Your library was restored. Reconnect AI accounts and review background processing before resuming.')
   const artifacts = await repairSavedDecoderArtifacts(app.getPath('userData')).catch(() => { emitActivityLog('warning', 'Saved transcript cleanup was skipped because its safety backup could not be created. Check free disk space.'); return { recordings: 0, segments: 0 } })
   if (artifacts.segments) emitActivityLog('info', `Removed ${artifacts.segments} decoder artifacts from ${artifacts.recordings} saved local transcripts. The original rows and a database backup were retained.`)
   const repaired = repairFragmentedSpeakers()
@@ -98,7 +113,12 @@ async function createWindow(): Promise<void> {
     const profileId = chatgpt.state().activeProfileId
     return providerFactory(() => chatgpt.accessToken(profileId), message => { if (profileId) chatgpt.block(profileId, message) }, () => chatgpt.sessionSignal(profileId))(provider)
   }
-  transcriptionQueue = new TranscriptionQueue({ vault, reviewMode: process.argv.includes('--review-library'), settings: readAISettings, dataPath: app.getPath('userData'), runner: new UtilityProcessingRunner(profileId => chatgpt.accessToken(profileId)), changed: libraryChanged, activity: emitActivityLog, chatgpt })
+  const restoreReview = queryOne<{ value: string }>("SELECT value FROM settings WHERE key='restore-review-required'")?.value === 'true'
+  transcriptionQueue = new TranscriptionQueue({ vault, reviewMode: restoreReview || process.argv.includes('--review-library'), settings: readAISettings, dataPath: app.getPath('userData'), runner: new UtilityProcessingRunner(profileId => chatgpt.accessToken(profileId)), changed: libraryChanged, activity: emitActivityLog, chatgpt })
+  registerTranscriptHandlers(transcriptionQueue, libraryChanged)
+  libraryRestore = new LibraryRestoreService({ dataPath: app.getPath('userData'), changed: state => { if (window && !window.isDestroyed()) window.webContents.send('restore:state', state) } })
+  registerRestoreHandlers(window, libraryRestore, libraryBackup, requestMaintenance)
+  registerUpdateHandlers(window, libraryBackup, requestMaintenance)
   recordingDeletion = new RecordingDeletionService({ dataPath: app.getPath('userData'), device: getDevicePipelineService(), pause: (id, operation) => transcriptionQueue!.withRecordingPaused(id, operation), waitPlayback: waitForPlayback, dismissDownload: filename => { getDownloadService().dismissTerminal(filename) }, changed: libraryChanged })
   registerRecordingControls(recordingDeletion, libraryChanged)
   registerAIHandlers(transcriptionQueue, vault, providers, libraryChanged, chatgpt, url => shell.openExternal(url))
@@ -119,7 +139,7 @@ async function createWindow(): Promise<void> {
   transcriptionQueue.start()
   const pipeline = getDevicePipelineService()
   pipeline.on('state', state => { if (state.phase === 'idle') startRecordingPoll() })
-  await pipeline.initAutoConnect().catch(error => emitActivityLog('error', error instanceof Error ? error.message : 'Could not connect to the recorder.'))
+  if (!restoreReview) await pipeline.initAutoConnect().catch(error => emitActivityLog('error', error instanceof Error ? error.message : 'Could not connect to the recorder.'))
   // Explicit local verification mode, never part of normal app startup.
   if (process.env.HIDOCKNOTES_SCREENSHOT) {
     await new Promise(resolve => setTimeout(resolve, 1000))
@@ -143,10 +163,19 @@ app.on('before-quit', event => {
   const pipeline = getDevicePipelineService()
   pipeline.removeAutoConnect()
   recordingEvents.removeAllListeners('verified')
-  void Promise.allSettled([pipeline.disconnect(), transcriptionQueue?.stop(), agentAccess?.close(), recordingDeletion?.drain(), libraryBackup?.stop()]).then(() => {
+  void Promise.allSettled([pipeline.disconnect(), transcriptionQueue?.stop(), agentAccess?.close(), recordingDeletion?.drain(), libraryBackup?.stop(), maintenanceAction ? undefined : libraryRestore?.stop()]).then(async results => {
     getDownloadService().destroy()
-    closeDatabase()
-    cleaned = true
-    app.quit()
+    try {
+      if (maintenanceAction) {
+        if (results.some(result => result.status === 'rejected')) throw new Error('A background operation could not stop safely. Your current library was kept.')
+        await maintenanceAction()
+      }
+      closeDatabase(); cleaned = true
+      if (maintenanceFinish) maintenanceFinish()
+      else app.quit()
+    } catch (error) {
+      dialog.showErrorBox('Could not complete the library operation', error instanceof Error ? error.message : 'Your current library was preserved.')
+      closeDatabase(); cleaned = true; app.relaunch(); app.quit()
+    }
   })
 })

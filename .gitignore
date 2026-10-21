@@ -30,3 +30,4 @@ models/
 *.onnx
 *.pem
 *.key
+/apps/electron/resources/update-policy.json

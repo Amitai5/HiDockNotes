@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { closeDatabase, getDetail, initializeDatabase, queryOne, renameRecording, run, upsertRecordingFromDevice } from '../services/database'
+import { closeDatabase, createProject, getDetail, initializeDatabase, queryOne, renameRecording, run, upsertRecordingFromDevice } from '../services/database'
 import { CredentialVault } from '../ai/credentials'
 import { TranscriptionQueue, type ProcessingRunner } from '../ai/queue'
 import { DEFAULT_AI_SETTINGS, DEFAULT_MODELS } from '../../../src/shared/ai'
@@ -8,6 +8,9 @@ import { ProcessingError } from '../ai/errors'
 import { ChatGPTPlanBlocked } from '../ai/chatgpt-protocol'
 import type { ChatGPTState } from '../../../src/shared/ai'
 import { saveTranscript } from '../ai/processing-store'
+import { editTranscript, transcriptReview } from '../services/transcript-revisions'
+import { saveReferenceContext } from '../services/reference-context'
+import { EMPTY_REFERENCE_CONTEXT } from '../../../src/shared/reference-context'
 
 const CLOUD_SETTINGS = { ...DEFAULT_AI_SETTINGS, transcription: { provider: 'gemini' as const, model: 'gemini-3.5-transcribe' } }
 
@@ -27,6 +30,22 @@ describe('persistent single-recording processing queue', () => {
     queue = new TranscriptionQueue({ vault, settings: () => structuredClone(CLOUD_SETTINGS), dataPath: '/local', runner, changed: vi.fn(), activity: vi.fn() })
     return queue
   }
+  it('snapshots global and recording-project context at execution and refreshes it for a later resummary', async () => {
+    const id = recording(), project = createProject('Selected'), other = createProject('Other')
+    run('UPDATE recordings SET project_id=? WHERE id=?', [project.id, id])
+    saveReferenceContext(null, { ...EMPTY_REFERENCE_CONTEXT, background: 'Global version one' }, 0)
+    saveReferenceContext(project.id, { ...EMPTY_REFERENCE_CONTEXT, terminology: 'Selected terms' }, 0)
+    saveReferenceContext(other.id, { ...EMPTY_REFERENCE_CONTEXT, terminology: 'Unrelated terms' }, 0)
+    const runner = { run: vi.fn().mockResolvedValue(result), stop: vi.fn().mockResolvedValue(undefined) }
+    const q = create(runner)
+    q.enqueue(id, true); await vi.advanceTimersByTimeAsync(1)
+    expect(runner.run.mock.calls[0][0].referenceContext).toMatchObject({ global: { background: 'Global version one' }, projects: [{ id: project.id, content: { terminology: 'Selected terms' } }] })
+    expect(JSON.stringify(runner.run.mock.calls[0][0].referenceContext)).not.toContain('Unrelated terms')
+    saveReferenceContext(null, { ...EMPTY_REFERENCE_CONTEXT, background: 'Global version two' }, 1)
+    q.reprocess(id, 'summarize'); await vi.advanceTimersByTimeAsync(1)
+    expect(runner.run.mock.calls[1][0].referenceContext.global.background).toBe('Global version two')
+    expect(runner.run.mock.calls[0][0].referenceContext.global.background).toBe('Global version one')
+  })
   it('backfills existing verified downloads and pauses until keys are verified', async () => {
     const id = recording(), unverified = recording(1, false), runner = { run: vi.fn(), stop: vi.fn().mockResolvedValue(undefined) }
     const q = create(runner, false)
@@ -36,6 +55,19 @@ describe('persistent single-recording processing queue', () => {
     expect(q.state()).toMatchObject({ ready: false })
     expect(runner.run).not.toHaveBeenCalled()
     expect(() => q.enqueue(unverified, true)).toThrow('verify')
+  })
+  it('stages retranscription for review and skips raw-text summaries when corrections exist', async () => {
+    const id = recording()
+    saveTranscript(id, result, CLOUD_SETTINGS)
+    editTranscript(id, result.segments[0].id, 'My corrected words', transcriptReview(id).version)
+    const runner = { run: vi.fn().mockImplementation(async (_input, observer: BackendObserver) => { observer.checkpoint({ ...result, segments: [{ ...result.segments[0], text: 'New automatic words' }] }); return { ...result, summary: null, segments: [{ ...result.segments[0], text: 'New automatic words' }] } }), stop: vi.fn().mockResolvedValue(undefined) }
+    const q = create(runner)
+    q.reprocess(id, 'transcribe'); await vi.advanceTimersByTimeAsync(1)
+    expect(runner.run.mock.calls[0][0].summaryReady).toBe(false)
+    expect(getDetail(id).segments[0].text).toBe('My corrected words')
+    expect(transcriptReview(id).candidate!.segments[0].text).toBe('New automatic words')
+    expect(queryOne('SELECT summary_pending FROM transcription_jobs WHERE recording_id=?', [id])).toEqual({ summary_pending: 0 })
+    expect(() => q.reprocess(id, 'summarize')).toThrow('Review')
   })
   it('runs exactly one recording at a time and ignores duplicate enqueue requests', async () => {
     const ids = [recording(0), recording(1)]

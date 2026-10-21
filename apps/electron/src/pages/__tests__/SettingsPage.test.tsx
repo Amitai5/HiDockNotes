@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { SettingsPage } from '../SettingsPage'
 import { useAppStore } from '../../store/useAppStore'
 import type { ElectronAPI } from '../../shared/contracts'
+import { EMPTY_REFERENCE_CONTEXT } from '../../shared/reference-context'
 
 vi.mock('../../components/AISettingsPanel', () => ({ AISettingsPanel: ({ sections }: { sections: string[] }) => <>{sections.includes('providers') && <section id="ai-providers" tabIndex={-1}>Provider controls</section>}{sections.includes('transcription') && <section id="transcription" tabIndex={-1}>Language controls</section>}{sections.includes('thresholds') && <section id="voice-thresholds" tabIndex={-1}>Threshold controls</section>}</> }))
 vi.mock('../../components/VoiceProfilesPanel', () => ({ VoiceProfilesPanel: () => <section id="voice-profiles" tabIndex={-1}>Voice controls</section> }))
@@ -19,6 +20,17 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 describe('searchable Settings tabs', () => {
+  it('finds global context through terminology search and preserves its draft between tabs', async () => {
+    window.electronAPI.referenceContext = { get: vi.fn(async () => ({ content: { ...EMPTY_REFERENCE_CONTEXT }, version: 0, updatedAt: null })), save: vi.fn() }
+    render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+    fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'glossary' } })
+    fireEvent.click(screen.getByRole('button', { name: /Global context & terminology/ }))
+    await waitFor(() => expect(screen.getByLabelText('Global terminology & spellings')).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('Global terminology & spellings'), { target: { value: 'Saved later' } })
+    fireEvent.click(screen.getByRole('tab', { name: 'AI & transcription' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'General' }))
+    expect(screen.getByLabelText('Global terminology & spellings')).toHaveValue('Saved later')
+  })
   it('shows General first and keeps other panels hidden', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>)
     expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'true')

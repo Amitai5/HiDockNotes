@@ -6,7 +6,7 @@ import type { TranscriptSegment } from '../../../src/shared/contracts'
 
 interface Artifact { segment_id: string; recording_id: string; start: number; end: number; text: string; speaker_id: string | null; reason: string }
 export function findDecoderArtifacts(): Artifact[] {
-  return queryAll<Omit<Artifact, 'reason'>>('SELECT s.id AS segment_id,s.recording_id,s.start,s.end,s.text,s.speaker_id FROM segments s JOIN transcripts t ON t.recording_id=s.recording_id WHERE t.provider=\'local\'').flatMap(segment => {
+  return queryAll<Omit<Artifact, 'reason'>>("SELECT s.id AS segment_id,s.recording_id,s.start,s.end,s.text,s.speaker_id FROM segments s JOIN transcripts t ON t.recording_id=s.recording_id WHERE t.provider='local' AND NOT EXISTS(SELECT 1 FROM transcript_corrections c WHERE c.recording_id=s.recording_id AND c.segment_id=s.id)").flatMap(segment => {
     const reason = decoderArtifactReason(segment.text)
     return reason ? [{ ...segment, reason }] : []
   })

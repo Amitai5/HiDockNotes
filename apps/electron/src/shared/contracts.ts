@@ -8,6 +8,10 @@ import type { LibraryNavigation } from './library'
 import type { AgentConnectionState, AgentSetupTarget } from './agents'
 import type { MeetingOverview, RecordingReprocessMode } from './meeting'
 import type { BackupResult, BackupState } from './backup'
+import type { RestorePreview, RestoreState } from './restore'
+import type { TranscriptCandidateChoice, TranscriptReview } from './transcript'
+import type { UpdateState } from './updates'
+import type { ReferenceContext, ReferenceContextDocument } from './reference-context'
 
 export type Unsubscribe = () => void
 export type RecordingStatus = 'device-only' | 'downloaded' | 'queued' | 'converting' | 'diarizing' | 'transcribing' | 'identifying' | 'summarizing' | 'done' | 'failed' | 'empty'
@@ -22,6 +26,10 @@ export interface DeviceFile extends FileInfo { localVerified?: boolean; active?:
 export interface DownloadView { filename: string; fileSize: number; progress: number; status: 'pending' | 'downloading' | 'cancelling' | 'completed' | 'failed' | 'cancelled'; error?: string; cancelReason?: 'user' | 'interrupted' }
 export interface DownloadState { queue: DownloadView[]; isPaused: boolean; isProcessing: boolean }
 export interface ElectronAPI {
+  referenceContext: { get(projectId: string | null): Promise<ReferenceContextDocument>; save(projectId: string | null, content: ReferenceContext, version: number): Promise<ReferenceContextDocument> }
+  updates: { state(): Promise<UpdateState>; check(): Promise<UpdateState>; download(): Promise<void>; install(confirmed: boolean): Promise<boolean>; openReleases(): Promise<void>; onState(cb: (state: UpdateState) => void): Unsubscribe }
+  restore: { state(): Promise<RestoreState>; choose(): Promise<RestorePreview | null>; cancel(): Promise<void>; confirm(id: string, confirmed: boolean): Promise<boolean>; onState(cb: (state: RestoreState) => void): Unsubscribe }
+  transcripts: { review(id: string): Promise<TranscriptReview>; revision(id: string, version: number): Promise<TranscriptSegment[]>; edit(id: string, segment: string, text: string, version: number): Promise<TranscriptReview>; restore(id: string, target: number, expected: number): Promise<TranscriptReview>; accept(id: string, choice: TranscriptCandidateChoice, version: number): Promise<TranscriptReview> }
   app: { info(): Promise<{ name: string; version: string; electron: string; platform: string }>; copyText(text: string): Promise<void>; minimize(): void; maximize(): void; close(): void; openRecordingsFolder(): Promise<void> }
   settings: { get(): Promise<AppSettings>; update(patch: Partial<Pick<AppSettings, 'name' | 'autoConnect' | 'autoDownload' | 'appearance'>>): Promise<AppSettings>; chooseStorage(): Promise<AppSettings | null> }
   backups: { state(): Promise<BackupState>; create(): Promise<BackupResult | null>; cancel(): Promise<void>; showFile(): Promise<void>; onState(callback: (state: BackupState) => void): Unsubscribe }

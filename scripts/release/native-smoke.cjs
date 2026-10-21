@@ -15,19 +15,24 @@ function smoke(resources) {
   } finally { database.close() }
   assert.equal(typeof load('usb').findByIds, 'function')
   assert.equal(typeof load('sherpa-onnx-node').OfflineRecognizer, 'function')
+  assert.equal(typeof load('electron-updater').NsisUpdater, 'function')
+  assert.ok(fs.statSync(path.join(path.dirname(load.resolve('electron-updater/package.json')), 'LICENSE')).size > 0, 'updater license')
   const ffmpeg = load('ffmpeg-static').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`)
   const conversion = spawnSync(ffmpeg, ['-version'], { encoding: 'utf8', timeout: 30000, windowsHide: true })
   if (conversion.error) { throw conversion.error }
   assert.equal(conversion.status, 0, conversion.stderr)
   assert.match(conversion.stdout, /ffmpeg version/)
   if (resources) {
+    const policy = load('./resources/update-policy.json')
+    assert.equal(typeof policy.signed, 'boolean')
+    if (policy.signed) { assert.match(policy.publicKey, /BEGIN PUBLIC KEY/) }
     assert.equal(load('./package.json').version, readVersion())
     for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'mcp-launcher.cjs']) { assert.ok(fs.statSync(path.join(resources, file)).size > 0, file) }
     for (const file of ['out/main/index.js', 'out/main/transcription-worker.js', 'out/preload/index.js', 'out/renderer/index.html']) {
       assert.ok(fs.statSync(path.join(resources, 'app.asar', file)).size > 0, file)
     }
   }
-  console.log(`Native smoke passed for ${process.platform}-${process.arch}${resources ? ' (packaged Electron)' : ' (Node)'}. SQLite/FTS, USB binding, speech runtime and ffmpeg loaded.`)
+  console.log(`Native smoke passed for ${process.platform}-${process.arch}${resources ? ' (packaged Electron)' : ' (Node)'}. SQLite/FTS, USB binding, speech runtime, updater and ffmpeg loaded.`)
 }
 
 function packagedSmoke() {

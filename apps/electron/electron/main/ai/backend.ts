@@ -17,9 +17,10 @@ import { ProcessingError } from './errors'
 import { isTranscriptionResult, readProcessingCache, writeProcessingCache } from './processing-cache'
 import { summarizeMeeting } from './meeting-summary'
 import { diarizeRecording } from './recording-diarization'
+import type { ReferenceContextSnapshot } from '../../../src/shared/reference-context'
 import { detectSpeech, filterSpeechTranscript, isSpeechIntervals } from './local-speech'
 
-export interface ProcessingInput { id: string; path: string; checksum: string; dataPath: string; settings: AISettings; keys: Record<ProviderId, string | null>; profiles: VoiceCandidate[]; chatgptProfileId?: string; summaryReady?: boolean; recordedAt?: string; generation?: string; expectedSpeakers?: number; savedTranscript?: TranscriptCheckpoint }
+export interface ProcessingInput { id: string; path: string; checksum: string; dataPath: string; settings: AISettings; keys: Record<ProviderId, string | null>; profiles: VoiceCandidate[]; chatgptProfileId?: string; summaryReady?: boolean; recordedAt?: string; generation?: string; expectedSpeakers?: number; savedTranscript?: TranscriptCheckpoint; referenceContext?: ReferenceContextSnapshot }
 export interface ProcessedSpeaker extends VoiceMatch { id: string; embedding: number[] | null }
 export interface TranscriptCheckpoint { segments: TranscriptSegment[]; speakers: ProcessedSpeaker[]; duration: number; speakerLimitReached?: boolean }
 export interface ProcessingResult extends TranscriptCheckpoint { summary: SummaryResult | null; empty: boolean; transcriptChanged?: boolean }
@@ -41,7 +42,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
     if ((!input.savedTranscript && settings.transcription.provider !== 'local' && !transcriptionKey) || (input.summaryReady !== false && (settings.chat.provider === 'chatgpt' ? !input.chatgptProfileId : !chatKey))) throw new ProcessingError('Configure the selected transcription and summary providers in Settings.')
     if (input.savedTranscript) {
       if (!input.savedTranscript.segments.length || input.summaryReady === false) throw new ProcessingError('A saved transcript and a configured summary provider are required.')
-      const summary = await summarizeMeeting(this.providers(settings.chat.provider, chatKey ?? undefined), settings.chat.model, input.savedTranscript.segments, settings, input.recordedAt, (progress, message) => observer.stage('summarizing', progress, message), signal)
+      const summary = await summarizeMeeting(this.providers(settings.chat.provider, chatKey ?? undefined), settings.chat.model, input.savedTranscript.segments, settings, input.recordedAt, (progress, message) => observer.stage('summarizing', progress, message), signal, input.referenceContext)
       return { ...input.savedTranscript, summary, empty: false, transcriptChanged: false }
     }
     observer.stage('converting', 0, 'Checking the verified audio and converting to 16 kHz mono…')
@@ -133,7 +134,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
     if (input.summaryReady === false) return { ...checkpoint, summary: null, empty: false }
     observer.stage('summarizing', 0, 'Creating a title, summary and action items…')
     const chat = this.providers(settings.chat.provider, chatKey ?? undefined)
-    const summary = await summarizeMeeting(chat, settings.chat.model, segments, settings, input.recordedAt, (progress, message) => observer.stage('summarizing', progress, message), signal)
+    const summary = await summarizeMeeting(chat, settings.chat.model, segments, settings, input.recordedAt, (progress, message) => observer.stage('summarizing', progress, message), signal, input.referenceContext)
     return { ...checkpoint, summary, empty: false }
   }
 }

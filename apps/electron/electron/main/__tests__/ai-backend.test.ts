@@ -4,6 +4,7 @@ import { LocalTranscriptionBackend, type BackendObserver, type ProcessingInput }
 import { ProcessingError } from '../ai/errors'
 import type { ModelCache } from '../ai/model-cache'
 import type { ProviderClient } from '../ai/providers'
+import { EMPTY_REFERENCE_CONTEXT } from '../../../src/shared/reference-context'
 
 const mocks = vi.hoisted(() => ({ files: new Map<string, string>(), checksum: vi.fn(), convert: vi.fn(), preflight: vi.fn(), extract: vi.fn(), speech: vi.fn() }))
 vi.mock('node:fs/promises', () => ({ mkdir: vi.fn(), rm: vi.fn(async (path: string) => { mocks.files.delete(path) }), readFile: vi.fn(async (path: string) => { if (!mocks.files.has(path)) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return mocks.files.get(path) }), writeFile: vi.fn(async (path: string, data: string) => { mocks.files.set(path, data) }), rename: vi.fn(async (from: string, to: string) => { mocks.files.set(to, mocks.files.get(from)!); mocks.files.delete(from) }) }))
@@ -27,6 +28,14 @@ describe('local transcription backend', () => {
     models = vi.fn(() => ({ ensureSpeech: vi.fn().mockResolvedValue('/speech.onnx'), ensure: vi.fn().mockResolvedValue({ segmentation: '/seg.onnx', embedding: '/embed.onnx' }) }) as unknown as ModelCache)
     client = { listModels: vi.fn(), chat: vi.fn(), transcribe: vi.fn().mockResolvedValue({ text: 'Send it.', words: [{ start: 2, end: 3, text: 'Send' }, { start: 3, end: 4, text: 'it.' }], segments: [] }), summarize: vi.fn().mockResolvedValue({ title: 'Plan', summary: 'Send the plan.', actionItems: [{ text: 'Send the plan', start: 2 }] }) }
     observer = { stage: vi.fn(), checkpoint: vi.fn() }
+  })
+  it.each([false, true])('passes reference context through %s saved-transcript mode without sending it to audio transcription', async saved => {
+    const referenceContext = { global: { ...EMPTY_REFERENCE_CONTEXT, terminology: 'Shared acronym' }, projects: [] }
+    const savedTranscript = saved ? { duration: 20, speakers: [], segments: [{ id: 'saved', start: 2, end: 4, text: 'My corrected text', speakerId: null, speakerName: null }] } : undefined
+    await new LocalTranscriptionBackend(() => client, diarize, models).process({ ...input, referenceContext, savedTranscript }, observer)
+    expect(vi.mocked(client.summarize).mock.calls[0][4]).toMatchObject({ referenceContext })
+    if (saved) expect(client.transcribe).not.toHaveBeenCalled()
+    else expect(vi.mocked(client.transcribe).mock.calls[0][1]).not.toHaveProperty('referenceContext')
   })
   it('converts, diarizes, transcribes, aligns, identifies and summarizes with independent providers', async () => {
     const providers = vi.fn(() => client)

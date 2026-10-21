@@ -5,7 +5,7 @@ describe('recording database', () => {
   beforeEach(() => initializeDatabase(':memory:'))
   afterEach(closeDatabase)
   it('applies versioned migrations and enables foreign keys', () => {
-    expect(getDatabase().pragma('user_version', { simple: true })).toBe(10)
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(11)
     expect(getDatabase().pragma('foreign_keys', { simple: true })).toBe(1)
     expect(queryOne('SELECT name FROM sqlite_master WHERE name=?', ['voice_samples'])).toBeDefined()
   })

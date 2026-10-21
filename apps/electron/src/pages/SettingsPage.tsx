@@ -8,6 +8,8 @@ import { AISettingsPanel } from '../components/AISettingsPanel'
 import { VoiceProfilesPanel } from '../components/VoiceProfilesPanel'
 import { AgentConnectionsPanel } from '../components/AgentConnectionsPanel'
 import { BackupSettingsPanel } from '../components/BackupSettingsPanel'
+import { UpdatesSettingsPanel } from '../components/UpdatesSettingsPanel'
+import { GlobalReferenceContext } from '../components/ReferenceContextEditor'
 import { SETTINGS_TABS, searchSettings, type SettingsTab } from '../settings/catalog'
 
 const tabIcons = { general: UserRound, ai: AudioLines, voices: Mic2, device: FolderOpen, agents: Plug, about: Info }
@@ -46,6 +48,7 @@ export function SettingsPage(): JSX.Element {
     <div hidden={!!query.trim() || tab !== 'general'} role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general">
       <section className="settings-section" id="your-name" tabIndex={-1}><h2><UserRound size={18} />Your name</h2><p>Your name, saved on this computer.</p><form className="name-form" onSubmit={event => { event.preventDefault(); void updateSettings({ name }).then(success => setSaved(success)) }}><input aria-label="Your name" placeholder="How should we greet you?" value={name} onChange={event => { setName(event.target.value); setSaved(false) }} maxLength={80} /><Button type="submit" variant="primary">{saved ? <Check size={15} /> : null}{saved ? 'Saved' : 'Save name'}</Button></form></section>
       <section className="settings-section" id="appearance" tabIndex={-1}><h2>Appearance</h2><p>Choose the look that suits your day.</p><div className="appearance-options">{([{ value: 'light', label: 'Light', Icon: Sun }, { value: 'dark', label: 'Dark', Icon: Moon }, { value: 'system', label: 'System', Icon: Monitor }] as const).map(({ value, label, Icon }) => <button key={value} className={settings?.appearance === value ? 'selected' : ''} onClick={() => { void updateSettings({ appearance: value }) }}><Icon size={20} />{label}{settings?.appearance === value && <Check size={14} />}</button>)}</div></section>
+      <GlobalReferenceContext />
     </div>
     <div hidden={!!query.trim() || tab !== 'ai'} role="tabpanel" id="settings-panel-ai" aria-labelledby="settings-tab-ai"><AISettingsPanel sections={['providers', 'transcription']} /></div>
     <div hidden={!!query.trim() || tab !== 'voices'} role="tabpanel" id="settings-panel-voices" aria-labelledby="settings-tab-voices"><VoiceProfilesPanel /><AISettingsPanel sections={['thresholds']} /></div>
@@ -56,6 +59,7 @@ export function SettingsPage(): JSX.Element {
     </div>
     <div hidden={!!query.trim() || tab !== 'agents'} role="tabpanel" id="settings-panel-agents" aria-labelledby="settings-tab-agents"><AgentConnectionsPanel /></div>
     <div hidden={!!query.trim() || tab !== 'about'} role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about">
+      <UpdatesSettingsPanel />
       <section className="settings-section" id="about" tabIndex={-1}><h2>About {product.name}</h2><p>For HiDock devices. An independent desktop application.</p><div className="version-line"><span>Version {version?.version ?? product.version}</span><span>Electron {version?.electron ?? '—'}</span><span>{version?.platform === 'win32' ? 'Windows' : version?.platform === 'darwin' ? 'macOS' : version?.platform ?? ''}</span></div><p className="license-note">MIT licensed. Jensen protocol and device services adapted from sgeraldes/hidock-next-2 at commit 31d44da. Copyright © 2025 Sebastian Geraldes. Full notices are included with the source and installer.</p></section>
     </div>
   </div>

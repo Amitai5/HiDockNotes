@@ -9,6 +9,7 @@ import { LibraryNavigationProvider } from '../../hooks/useLibraryNavigation'
 import { useAppStore } from '../../store/useAppStore'
 import type { ElectronAPI, RecordingView } from '../../shared/contracts'
 import { RECORDING_DRAG_TYPE } from '../../hooks/useRecordingDrop'
+import { EMPTY_REFERENCE_CONTEXT } from '../../shared/reference-context'
 
 vi.mock('../../components/ProcessingQueue', () => ({ ProcessingQueue: () => null }))
 const create = vi.fn()
@@ -26,6 +27,16 @@ beforeEach(() => {
 afterEach(cleanup)
 function show(path = '/library') { return render(<MemoryRouter initialEntries={[path]}><LibraryNavigationProvider><aside aria-label="Library navigation"><LibrarySidebar /></aside><main><LibraryPage /></main></LibraryNavigationProvider></MemoryRouter>) }
 describe('project folders inside Library', () => {
+  it('opens a context editor for the selected project without showing loose recordings', async () => {
+    window.electronAPI.referenceContext = { get: vi.fn(async () => ({ content: { ...EMPTY_REFERENCE_CONTEXT, background: 'Project background' }, version: 1, updatedAt: '2026-10-20T12:00:00Z' })), save: vi.fn() }
+    show('/library?project=team')
+    await screen.findByRole('heading', { name: 'Team', level: 1 }, { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Project context' }))
+    expect(await screen.findByDisplayValue('Project background')).toBeVisible()
+    expect(window.electronAPI.referenceContext.get).toHaveBeenCalledWith('team')
+    expect(screen.getByRole('heading', { name: 'Team context' })).toBeVisible()
+    expect(screen.queryByRole('link', { name: /Quick thought/ })).toBeNull()
+  })
   it('shows every project folder above loose recordings, with matching sidebar links', async () => {
     show()
     const page = within(screen.getByRole('main'))

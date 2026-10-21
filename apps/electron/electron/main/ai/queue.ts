@@ -7,8 +7,10 @@ import type { BackendObserver, ProcessingInput, ProcessingResult } from './backe
 import { ProcessingError, safeProcessingError } from './errors'
 import { voiceCandidates } from './voices'
 import { savedTranscript, saveProcessingResult, saveTranscript } from './processing-store'
+import { hasTranscriptCorrections, stageTranscriptCandidate } from '../services/transcript-revisions'
 import { repairRecordingSpeakers } from './speaker-repair'
 import { ChatGPTPlanBlocked } from './chatgpt-protocol'
+import { referenceContextSnapshot } from '../services/reference-context'
 
 export interface ProcessingRunner { run(input: ProcessingInput, observer: BackendObserver): Promise<ProcessingResult>; stop(): Promise<void> }
 interface QueueDependencies { vault: CredentialVault; settings(): AISettings; dataPath: string; runner: ProcessingRunner; changed(): void; activity(type: 'info' | 'success' | 'warning' | 'error', message: string): void; now?: () => Date; reviewMode?: boolean; chatgpt?: { state(): ChatGPTState; block?(id: string, message: string): void } }
@@ -48,6 +50,7 @@ export class TranscriptionQueue {
     if (confirmed !== true) throw new Error('Confirm the selected providers before resuming processing.')
     if (!this.reviewPaused) return
     this.reviewPaused = false
+    run("DELETE FROM settings WHERE key='restore-review-required'")
     this.dependencies.activity('info', 'Background processing resumed with the selected providers after confirmation.')
     this.enqueuePending(); this.kick(); this.dependencies.changed()
   }
@@ -100,6 +103,7 @@ export class TranscriptionQueue {
     return rows.length
   }
   reprocess(id: string, mode: RecordingReprocessMode): void {
+    if (queryOne('SELECT recording_id FROM transcript_candidates WHERE recording_id=?', [id])) throw new Error('Review or discard the new transcription before processing this recording again.')
     if (this.reviewPaused) throw new Error(REVIEW_PAUSED_MESSAGE)
     if (this.paused.has(id) || queryOne('SELECT recording_id FROM recording_deletions WHERE recording_id=?', [id])) throw new Error('Finish deleting this recording before processing it.')
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id=?', [id])
@@ -170,23 +174,33 @@ export class TranscriptionQueue {
       runInTransaction(() => { run("UPDATE transcription_jobs SET stage=?, progress=0, attempt=attempt+1, error=NULL, next_attempt_at=NULL, message='Starting the background processor…' WHERE recording_id=?", [initialStage, job.recording_id]); run('UPDATE recordings SET status=? WHERE id=?', [initialStage, job.recording_id]) })
       this.dependencies.changed()
       const settings = this.dependencies.settings()
-      const summaryReady = this.state().summaryReady ?? true
+      const reviewTranscript = job.mode !== 'summarize' && hasTranscriptCorrections(recording.id)
+      const summaryReady = !reviewTranscript && (this.state().summaryReady ?? true)
       chatgptProfileId = summaryReady && settings.chat.provider === 'chatgpt' ? this.dependencies.chatgpt?.state().activeProfileId ?? undefined : undefined
       this.activeChatGPTProfile = chatgptProfileId
       const keys: ProcessingInput['keys'] = { gemini: null, openai: null }
       for (const provider of new Set([...(job.mode === 'summarize' || settings.transcription.provider === 'local' ? [] : [settings.transcription.provider]), ...(!summaryReady || settings.chat.provider === 'chatgpt' ? [] : [settings.chat.provider])])) keys[provider] = this.dependencies.vault.read(provider)
       if (job.mode === 'summarize') repairRecordingSpeakers(recording.id)
-      const input: ProcessingInput = { id: recording.id, path: recording.file_path ?? '', checksum: recording.checksum ?? '', dataPath: this.dependencies.dataPath, settings, keys, profiles: job.mode === 'summarize' ? [] : voiceCandidates(), chatgptProfileId, summaryReady, recordedAt: recording.date_recorded, generation: job.generation ?? undefined, expectedSpeakers: queryOne<{ expected_speakers: number | null }>('SELECT expected_speakers FROM recording_overviews WHERE recording_id=?', [recording.id])?.expected_speakers ?? undefined, savedTranscript: job.mode === 'summarize' ? savedTranscript(recording.id) : undefined }
+      const input: ProcessingInput = { id: recording.id, path: recording.file_path ?? '', checksum: recording.checksum ?? '', dataPath: this.dependencies.dataPath, settings, keys, profiles: job.mode === 'summarize' ? [] : voiceCandidates(), chatgptProfileId, summaryReady, recordedAt: recording.date_recorded, generation: job.generation ?? undefined, expectedSpeakers: queryOne<{ expected_speakers: number | null }>('SELECT expected_speakers FROM recording_overviews WHERE recording_id=?', [recording.id])?.expected_speakers ?? undefined, savedTranscript: job.mode === 'summarize' ? savedTranscript(recording.id) : undefined, referenceContext: referenceContextSnapshot(recording.project_id) }
       const result = await this.dependencies.runner.run(input, {
         stage: (stage, progress, message) => {
           if (this.stopped || this.paused.has(recording.id) || this.activeRecordingId !== recording.id) return
           runInTransaction(() => { run('UPDATE transcription_jobs SET stage=?, progress=?, message=? WHERE recording_id=?', [stage, Math.max(0, Math.min(1, progress)), message, recording.id]); run('UPDATE recordings SET status=? WHERE id=?', [stage, recording.id]) })
           this.dependencies.changed()
         },
-        checkpoint: value => { if (!this.stopped && !this.paused.has(recording.id) && this.activeRecordingId === recording.id) { saveTranscript(recording.id, value, settings); this.dependencies.changed() } }
+        checkpoint: value => { if (!reviewTranscript && !this.stopped && !this.paused.has(recording.id) && this.activeRecordingId === recording.id) { saveTranscript(recording.id, value, settings); this.dependencies.changed() } }
       })
       if (this.sessionCancelled) throw new ProcessingError('The ChatGPT connection changed. Processing will resume with the selected connection.')
       if (!this.stopped && !this.paused.has(recording.id)) {
+        if (reviewTranscript) {
+          runInTransaction(() => {
+            if (!result.empty) stageTranscriptCandidate(recording.id, result, settings)
+            run("UPDATE recordings SET status='done' WHERE id=?", [recording.id])
+            run("UPDATE transcription_jobs SET stage='done',progress=1,summary_pending=0,error=NULL,message=? WHERE recording_id=?", [result.empty ? 'No usable speech was returned. Your corrected transcript was kept.' : 'New transcription ready for comparison. Your corrections and notes were kept.', recording.id])
+          })
+          this.dependencies.activity('info', result.empty ? 'Your corrected transcript was kept because the new transcription contained no usable speech.' : 'New transcription is ready for review. Apply it to regenerate the summary.')
+          return
+        }
         saveProcessingResult(recording.id, result, settings)
         this.dependencies.activity(result.empty ? 'info' : 'success', result.empty ? 'Skipped an empty recording after local audio checks.' : result.summary ? 'Transcript, summary and action items are ready.' : 'Local transcript is ready. Configure a summary provider to add a summary and action items.')
       }

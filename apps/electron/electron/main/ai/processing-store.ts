@@ -5,9 +5,11 @@ import { embeddingBytes } from './voice-matching'
 import { getDetail } from '../services/database'
 import { transcriptContent } from './providers'
 import type { ProcessingResult, TranscriptCheckpoint } from './backend'
+import { rememberTranscript, transcriptVersion } from '../services/transcript-revisions'
 
 export function saveTranscript(id: string, checkpoint: TranscriptCheckpoint, settings: AISettings): void {
   runInTransaction(() => {
+    rememberTranscript(id, 'Previous transcription')
     for (const speaker of checkpoint.speakers) run(`INSERT INTO speakers(id, recording_id, label, voice_profile_id, embedding, suggested_profile_id, match_score) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET embedding=excluded.embedding,
       label=CASE WHEN speakers.label_source='manual' THEN speakers.label ELSE excluded.label END,
@@ -21,6 +23,7 @@ export function saveTranscript(id: string, checkpoint: TranscriptCheckpoint, set
     const named = checkpoint.segments.map(segment => ({ ...segment, speakerName: segment.speakerId ? queryOne<{ label: string }>('SELECT label FROM speakers WHERE id=?', [segment.speakerId])?.label ?? segment.speakerName : segment.speakerName }))
     run('INSERT INTO transcripts(id, recording_id, text, language, provider, model) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET text=excluded.text, language=excluded.language, provider=excluded.provider, model=excluded.model', [randomUUID(), id, transcriptContent(named), settings.language, settings.transcription.provider, settings.transcription.model])
     run('UPDATE recordings SET duration_seconds=?, duration_source=? WHERE id=?', [checkpoint.duration, 'file', id])
+    rememberTranscript(id, 'Transcription')
   })
 }
 export function savedTranscript(id: string): TranscriptCheckpoint {
@@ -32,6 +35,7 @@ export function saveProcessingResult(id: string, result: ProcessingResult, setti
   runInTransaction(() => {
     if (!result.empty && result.transcriptChanged !== false) saveTranscript(id, result, settings)
     if (result.summary) {
+      run('INSERT INTO recording_overviews(recording_id,summary_version) VALUES (?,?) ON CONFLICT(recording_id) DO UPDATE SET summary_version=excluded.summary_version', [id, transcriptVersion(id)])
       const recording = queryOne<Recording & { title_source: string | null }>('SELECT * FROM recordings WHERE id=?', [id])
       if (recording && (!recording.title || recording.title_source === 'ai')) run("UPDATE recordings SET title=?, title_source='ai' WHERE id=?", [result.summary.title, id])
       run('INSERT INTO summaries(id, recording_id, text, template) VALUES (?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET text=excluded.text, template=excluded.template', [randomUUID(), id, result.summary.summary, settings.summaryTemplate])

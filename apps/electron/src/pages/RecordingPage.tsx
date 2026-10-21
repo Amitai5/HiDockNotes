@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CalendarDays, CheckCircle2, FileText, Folder, ListChecks, LoaderCircle, Pause, Pencil, Play, SkipBack, Sparkles, Tags, UsersRound, Volume2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import type { ProjectView, RecordingDetail } from '../shared/contracts'
+import type { ProjectView, RecordingDetail, TranscriptSegment } from '../shared/contracts'
 import type { AIState, SpeakerView } from '../shared/ai'
 import { Button, formatDuration } from '../components/ui'
 import { RecordingTitle } from '../components/RecordingTitle'
@@ -15,6 +15,7 @@ import { RecordingActions } from '../components/RecordingActions'
 import { SpeakerEditor, speakerColors, type SpeakerEdit } from '../components/SpeakerEditor'
 import { useRecordingPlayback } from '../hooks/useRecordingPlayback'
 import { ProcessingControls } from '../components/ProcessingControls'
+import { TranscriptTools } from '../components/TranscriptTools'
 
 const ACTIVE_STAGES = ['queued', 'converting', 'diarizing', 'transcribing', 'identifying', 'summarizing']
 export function RecordingPage(): JSX.Element {
@@ -31,6 +32,7 @@ function RecordingContent({ id }: { id: string }): JSX.Element {
   const [waveform, setWaveform] = useState<{ peaks: number[]; duration: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [speaker, setSpeaker] = useState<SpeakerEdit | null>(null)
+  const [edit, setEdit] = useState<TranscriptSegment | null>(null)
   const speakerTrigger = useRef<HTMLElement | null>(null)
   const colors = useMemo(() => speakerColors(detail?.segments.map(segment => segment.speakerName ?? 'Unknown speaker') ?? []), [detail?.segments])
   const { audio, position, playing, loading, rate, seek, playPause, changeRate, suspend } = useRecordingPlayback(id, !!detail?.recording.hasAudio, Number(query.get('t')) || 0)
@@ -89,10 +91,11 @@ function RecordingContent({ id }: { id: string }): JSX.Element {
     {detail.recording.hasAudio ? <div className="audio-player"><audio ref={audio} src={`app-media://recording/${id}`} preload="metadata" /><div className="waveform" role="slider" tabIndex={0} aria-label="Seek in recording" aria-valuemin={0} aria-valuemax={duration} aria-valuenow={position} onKeyDown={event => { if (event.key === 'ArrowRight') seek(Math.min(duration, position + 5)); if (event.key === 'ArrowLeft') seek(Math.max(0, position - 5)) }} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); seek(Math.max(0, Math.min(duration, (event.clientX - rect.left) / rect.width * duration))) }}><svg viewBox="0 0 720 84" preserveAspectRatio="none" aria-hidden="true">{waveform ? waveform.peaks.map((peak, index) => <rect key={index} x={index * 4} y={42 - Math.max(2, peak * 38)} width="2.5" height={Math.max(4, peak * 76)} rx="1.2" fill={index / waveform.peaks.length <= position / duration ? 'var(--accent)' : 'var(--wave-muted)'} />) : <line x1="0" y1="42" x2="720" y2="42" stroke="var(--border)" />}</svg></div><div className="player-controls"><Button variant="ghost" aria-label="Back 10 seconds" onClick={() => seek(Math.max(0, position - 10))}><SkipBack size={18} /></Button><Button className="play-button" variant="primary" aria-label={loading ? 'Cancel playback' : playing ? 'Pause audio' : 'Play audio'} onClick={() => { void playPause() }}>{loading ? <LoaderCircle className="animate-spin" size={19} /> : playing ? <Pause size={19} /> : <Play size={19} />}</Button><span className="player-time">{formatDuration(position)} <span>/ {formatDuration(duration)}</span></span><select aria-label="Playback speed" value={rate} onChange={event => changeRate(Number(event.target.value))}><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select><div className="player-volume"><Volume2 size={17} /><input aria-label="Audio volume" type="range" min="0" max="1" step="0.05" defaultValue="1" onChange={event => { if (audio.current) audio.current.volume = Number(event.target.value) }} /></div></div></div> : <div className="inline-empty">Download this recording from Sync to play it here.</div>}
       </div>
       <section className="recording-transcript" aria-labelledby="transcript-heading"><h2 id="transcript-heading"><FileText size={18} />Transcript</h2>
+      <TranscriptTools recordingId={id} segments={detail.segments} edit={edit} onCloseEdit={() => setEdit(null)} onChanged={refresh} disabled={active || busy} />
       {detail.segments.length ? detail.segments.map(segment => {
         const voice = detail.speakers?.find(value => value.id === segment.speakerId)
         const label = segment.speakerName ?? voice?.label ?? 'Unknown speaker'
-        return <div key={segment.id} className={`transcript-segment ${position >= segment.start && position < segment.end ? 'current' : ''}`}><button className="transcript-time" aria-label={`Play from ${formatDuration(segment.start)}`} onClick={() => seek(segment.start)}><time>{formatDuration(segment.start)}</time></button><span>{<button className={`speaker-label ${colors.get(label.trim().toLowerCase()) ?? 'speaker-unknown'}`} aria-label={voice ? `Rename ${label}` : `Assign speaker at ${formatDuration(segment.start)}`} onClick={() => openSpeaker(voice ? { speaker: voice } : { segment })}><strong>{label}</strong><Pencil size={12} /></button>}{voice?.suggestedName && <Button className="speaker-suggestion" variant="ghost" onClick={() => { void window.electronAPI.voices.confirmSpeaker(voice.id).then(refresh).catch(reportError) }}>Possibly {voice.suggestedName}? <CheckCircle2 size={12} /></Button>}<button className="transcript-text" onClick={() => seek(segment.start)}>{segment.text}</button></span></div>
+        return <div key={segment.id} className={`transcript-segment ${position >= segment.start && position < segment.end ? 'current' : ''}`}><button className="transcript-time" aria-label={`Play from ${formatDuration(segment.start)}`} onClick={() => seek(segment.start)}><time>{formatDuration(segment.start)}</time></button><span>{<button className={`speaker-label ${colors.get(label.trim().toLowerCase()) ?? 'speaker-unknown'}`} aria-label={voice ? `Rename ${label}` : `Assign speaker at ${formatDuration(segment.start)}`} onClick={() => openSpeaker(voice ? { speaker: voice } : { segment })}><strong>{label}</strong><Pencil size={12} /></button>}{voice?.suggestedName && <Button className="speaker-suggestion" variant="ghost" onClick={() => { void window.electronAPI.voices.confirmSpeaker(voice.id).then(refresh).catch(reportError) }}>Possibly {voice.suggestedName}? <CheckCircle2 size={12} /></Button>}<button className="transcript-text" onClick={() => seek(segment.start)}>{segment.text}</button><button className="transcript-edit-button" aria-label={`Edit excerpt at ${formatDuration(segment.start)}`} title="Edit transcript excerpt" disabled={active || busy} onClick={() => setEdit(segment)}><Pencil size={13} /></button></span></div>
       }) : <div className="inline-empty">{active ? 'The transcript will appear here as soon as transcription finishes.' : detail.recording.status === 'empty' ? 'This recording contains silence or no usable audio.' : !detail.recording.hasAudio ? 'Download the audio first, then the app can transcribe it.' : 'Set up AI in Settings to turn this recording into a transcript, summary and action items.'}</div>}
     </section>
     </>} />
