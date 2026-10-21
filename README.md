@@ -6,6 +6,8 @@ The public repository is [Amitai5/HiDockNotes](https://github.com/Amitai5/HiDock
 
 ## Current build
 
+Version **0.12.0** replaces client-specific MCP commands with one copyable stdio JSON configuration. Settings and chat use shorter labels and fewer help paragraphs; appearance controls live in Settings. Remembered voices use a compact person list with a selected sample panel, inline rename, and a merge dialog. Existing voice recognition, MCP permissions, application data and IPC contracts are unchanged.
+
 Version **0.11.0** adds editable global and project reference context for summaries and Assistant. Set shared background, approved names and terminology in **Settings → General → Global context**, or open a project folder in Library and choose **Project context**. Project details apply only to that folder; global details also apply to unfiled recordings. Context guides interpretation and spelling without identifying voices or becoming meeting evidence. Saving does not rewrite transcripts or reprocess old notes; use Resummarize to apply it to an existing recording. Both scopes are included in complete backups and restore. [Reference context guide](docs/reference-context.md).
 
 Version **0.10.0** adds verified complete-library restore, transcript corrections with recoverable version history, and comparison before replacing corrected transcripts after retranscription. Settings also provides update checks and release notes; signed update installation and signing CI are prepared for configured certificates. [Recovery, transcript editing and update setup](docs/backup-transcripts-updates.md).
@@ -181,9 +183,9 @@ The new app omits the removed integrations and identity/graph systems. The devic
 
 1. Keep HiDockNotes running and open **Settings → Agent connections**.
 2. Enable **MCP access**. It is off on a new installation.
-3. Select **Codex** or **Claude Code**, copy the generated command, and run it in your terminal (PowerShell on Windows). Restart the client so it loads the connection. Other stdio MCP clients can use the generated JSON configuration.
+3. Choose **Copy configuration** and add the JSON server entry to your agent’s MCP settings. For clients with separate fields, use the generated command, arguments and environment. No Codex or Claude command-line installation is required.
 4. Ask your agent to find a recording, read its notes, or list outstanding action items. The tools are `list_projects`, `list_recordings`, `search_recordings`, `get_recording`, and `list_action_items`. Pages include continuation offsets for larger libraries and transcripts. `projectId: null` selects unfiled recordings.
-5. Turn MCP access off to revoke reads immediately. If you move or reinstall the app at another path, copy the updated command.
+5. Turn MCP access off to revoke reads immediately. If you move or reinstall the app at another path, copy the updated configuration.
 
 The generated configuration starts the bundled `mcp-launcher.cjs` using the app executable with `ELECTRON_RUN_AS_NODE=1`. This small stdio relay starts a tools-only Electron helper and prevents Windows console startup output from interrupting MCP. On a fresh Windows profile it waits for the operating-system encryption key to be saved before the helper loads it. The helper's `--mcp-stdio` mode never starts a window, USB service, database connection, or transcription worker. It delegates paginated read requests to the normal app's authenticated loopback gateway. The discovery credential is encrypted with Electron safeStorage, never placed in command lines, URLs, logs, or plaintext configuration. The relay uses an authenticated local socket with an in-memory nonce. No additional runtime dependency, Node installation, API key, or cloud service is needed. macOS uses the same bundled executable and keychain storage.
 

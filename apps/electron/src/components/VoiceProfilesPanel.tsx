@@ -1,26 +1,73 @@
 import * as AlertDialog from '@radix-ui/react-alert-dialog'
+import * as Dialog from '@radix-ui/react-dialog'
 import { useEffect, useState } from 'react'
-import { ArrowUpRight, Mic2, Pencil, Trash2 } from 'lucide-react'
+import { ArrowUpRight, AudioLines, Check, ChevronRight, LoaderCircle, Merge, Mic2, Pencil, Trash2, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import type { VoiceProfileView } from '../shared/ai'
 import { Button } from './ui'
-import { reportError } from '../store/useAppStore'
+
+function initials(name: string): string { return name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toLocaleUpperCase() }
+function errorMessage(value: unknown): string { return value instanceof Error ? value.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Could not save this change. Try again.' }
 
 export function VoiceProfilesPanel(): JSX.Element {
   const [profiles, setProfiles] = useState<VoiceProfileView[]>([])
-  const [editing, setEditing] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
-  const [merge, setMerge] = useState<Record<string, string>>({})
+  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null)
+  const [mergeTarget, setMergeTarget] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
   const [confirmation, setConfirmation] = useState<{ title: string; description: string; action: () => Promise<void> } | null>(null)
-  function refresh(): Promise<void> { return window.electronAPI.voices.list().then(setProfiles) }
-  useEffect(() => { void refresh().catch(reportError); return window.electronAPI.library.onChanged(() => { void refresh().catch(reportError) }) }, [])
-  async function perform(action: () => Promise<void>): Promise<void> { setBusy(true); try { await action(); setEditing(null); await refresh() } catch (error) { reportError(error) } finally { setBusy(false) } }
-  return <section className="settings-section" id="voice-profiles" tabIndex={-1}><h2><Mic2 size={18} />Remembered voices</h2><p>Rename a speaker in a transcript to teach the app their voice. Profiles keep up to ten recent confirmed samples.</p>
-    {profiles.length ? <div className="voice-profiles">{profiles.map(profile => <div key={profile.id} className="voice-profile"><div className="voice-profile-heading">{editing === profile.id ? <form onSubmit={event => { event.preventDefault(); void perform(() => window.electronAPI.voices.rename(profile.id, name)) }}><input autoFocus aria-label="Voice profile name" maxLength={80} value={name} onChange={event => setName(event.target.value)} /><Button type="submit" disabled={busy || !name.trim()}>Save</Button><Button type="button" onClick={() => setEditing(null)}>Cancel</Button></form> : <><strong>{profile.name}</strong><span className="muted">{profile.samples.length} sample{profile.samples.length === 1 ? '' : 's'}</span><Button variant="ghost" aria-label={`Rename ${profile.name}`} disabled={busy} onClick={() => { setName(profile.name); setEditing(profile.id) }}><Pencil size={14} /></Button><Button variant="ghost" aria-label={`Delete ${profile.name}`} disabled={busy} onClick={() => setConfirmation({ title: `Delete ${profile.name}’s voice profile?`, description: 'Saved voice samples will be removed. Existing transcript labels will stay as they are.', action: () => window.electronAPI.voices.delete(profile.id, true) })}><Trash2 size={14} /></Button></>}</div>
-      {profiles.length > 1 && <div className="voice-merge"><select aria-label={`Merge ${profile.name} into`} value={merge[profile.id] ?? ''} onChange={event => setMerge(previous => ({ ...previous, [profile.id]: event.target.value }))}><option value="">Merge into another profile…</option>{profiles.filter(other => other.id !== profile.id).map(other => <option key={other.id} value={other.id}>{other.name}</option>)}</select><Button disabled={busy || !merge[profile.id]} onClick={() => setConfirmation({ title: 'Merge these voices?', description: `${profile.name}’s samples and transcript labels will be combined with the selected profile. Up to ten recent samples are kept.`, action: () => window.electronAPI.voices.merge(profile.id, merge[profile.id]) })}>Merge</Button></div>}
-      <details><summary>{profile.samples.length ? 'Manage voice samples' : 'No clean sample was available for this speaker'}</summary>{profile.samples.map(sample => <div className="voice-sample" key={sample.id}><span>{sample.recordingTitle ?? 'Source recording unavailable'}<small>{new Date(sample.createdAt).toLocaleString()}</small></span>{sample.recordingId && <Link to={`/library/${sample.recordingId}`} aria-label="Open voice sample recording"><ArrowUpRight size={15} /></Link>}<Button variant="ghost" disabled={busy} aria-label="Delete voice sample" onClick={() => setConfirmation({ title: 'Delete this voice sample?', description: 'This sample will no longer be used to recognize the voice. The audio and transcript stay in your Library.', action: () => window.electronAPI.voices.deleteSample(sample.id, true) })}><Trash2 size={14} /></Button></div>)}</details>
-    </div>)}</div> : <div className="inline-empty">No remembered voices yet. Open a transcript and click a speaker’s name to add one.</div>}
-    <AlertDialog.Root open={confirmation !== null} onOpenChange={open => { if (!open) setConfirmation(null) }}><AlertDialog.Portal><AlertDialog.Overlay className="dialog-overlay" /><AlertDialog.Content className="confirmation-dialog"><AlertDialog.Title>{confirmation?.title}</AlertDialog.Title><AlertDialog.Description>{confirmation?.description}</AlertDialog.Description><div className="dialog-actions"><AlertDialog.Cancel asChild><Button>Cancel</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button variant="danger" onClick={() => { if (confirmation) void perform(confirmation.action) }}>Confirm</Button></AlertDialog.Action></div></AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root>
+  const selected = profiles.find(profile => profile.id === selectedId) ?? profiles[0]
+  const mergeSource = profiles.find(profile => profile.id === mergeSourceId)
+  function refresh(): Promise<void> { return window.electronAPI.voices.list().then(value => { setProfiles(value); setLoadError('') }) }
+  useEffect(() => {
+    let mounted = true
+    const load = (): void => { void window.electronAPI.voices.list().then(value => { if (mounted) { setProfiles(value); setLoadError('') } }).catch(value => { if (mounted) setLoadError(errorMessage(value)) }).finally(() => { if (mounted) setLoading(false) }) }
+    load()
+    const unsubscribe = window.electronAPI.library.onChanged(load)
+    return () => { mounted = false; unsubscribe() }
+  }, [])
+  async function perform(action: () => Promise<void>): Promise<boolean> {
+    setBusy(true); setError('')
+    try { await action(); await refresh(); setEditing(false); return true }
+    catch (value) { setError(errorMessage(value)); return false }
+    finally { setBusy(false) }
+  }
+  return <section className="settings-section" id="voice-profiles" tabIndex={-1}>
+    <h2><Mic2 size={18} />Remembered voices</h2>
+    {loading ? <div className="voice-loading" role="status"><LoaderCircle className="animate-spin" size={17} />Loading voices…</div> : loadError && !profiles.length ? <div className="voice-load-error" role="alert"><p>{loadError}</p><Button onClick={() => { setLoading(true); void refresh().catch(value => setLoadError(errorMessage(value))).finally(() => setLoading(false)) }}>Retry</Button></div> : selected ? <div className="voice-browser">
+      <div className="voice-list" role="group" aria-label="Remembered people">{profiles.map(profile => <button type="button" key={profile.id} className="voice-person" aria-label={`${profile.name}, ${profile.samples.length} sample${profile.samples.length === 1 ? '' : 's'}`} aria-pressed={selected.id === profile.id} disabled={busy} onClick={() => { setSelectedId(profile.id); setEditing(false); setError('') }}>
+        <span className="voice-avatar" aria-hidden="true">{initials(profile.name)}</span><span className="voice-person-label"><strong>{profile.name}</strong><span>{profile.samples.length} sample{profile.samples.length === 1 ? '' : 's'}</span></span><ChevronRight size={15} aria-hidden="true" />
+      </button>)}</div>
+      <section className="voice-detail" aria-label={`${selected.name} voice samples`}>
+        <div className="voice-detail-heading">{editing ? <form className="voice-name-form" onSubmit={event => { event.preventDefault(); if (name.trim()) void perform(() => window.electronAPI.voices.rename(selected.id, name.trim())) }}>
+          <input autoFocus aria-label="Voice profile name" maxLength={80} value={name} disabled={busy} onChange={event => setName(event.target.value)} /><Button type="submit" aria-label="Save voice name" disabled={busy || !name.trim()}><Check size={15} />Save</Button><Button type="button" disabled={busy} onClick={() => { setEditing(false); setError('') }}>Cancel</Button>
+        </form> : <><div><h3>{selected.name}</h3><span>{selected.samples.length} saved sample{selected.samples.length === 1 ? '' : 's'}</span></div><div className="voice-detail-actions">
+          <Button variant="ghost" aria-label={`Rename ${selected.name}`} title="Rename voice" disabled={busy} onClick={() => { setSelectedId(selected.id); setName(selected.name); setEditing(true); setError('') }}><Pencil size={16} /></Button>
+          {profiles.length > 1 && <Button variant="ghost" aria-label={`Merge ${selected.name}`} title="Merge voice" disabled={busy} onClick={() => { setMergeSourceId(selected.id); setMergeTarget(''); setError('') }}><Merge size={16} /></Button>}
+          <Button variant="ghost" aria-label={`Delete ${selected.name}`} title="Delete voice" disabled={busy} onClick={() => { setError(''); setConfirmation({ title: `Delete ${selected.name}’s voice profile?`, description: 'Removes saved voice samples. Transcript names stay unchanged.', action: () => window.electronAPI.voices.delete(selected.id, true) }) }}><Trash2 size={16} /></Button>
+        </div></>}</div>
+        {error && !mergeSourceId && !confirmation && <p className="provider-error" role="alert">{error}</p>}
+        {selected.samples.length ? <div className="voice-samples">{selected.samples.map(sample => <div className="voice-sample" key={sample.id}>
+          <AudioLines size={18} aria-hidden="true" /><div className="voice-sample-label">{sample.recordingId ? <Link to={`/library/${sample.recordingId}`} aria-label={`Open sample from ${sample.recordingTitle ?? 'source recording'}`}>{sample.recordingTitle ?? 'Source recording'}<ArrowUpRight size={14} /></Link> : <span>Source recording unavailable</span>}<time dateTime={sample.createdAt} title={new Date(sample.createdAt).toLocaleString()}>{new Date(sample.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</time></div>
+          <Button variant="ghost" disabled={busy} aria-label={`Delete voice sample from ${sample.recordingTitle ?? 'unavailable recording'}`} title="Delete sample" onClick={() => { setError(''); setConfirmation({ title: 'Delete this voice sample?', description: 'Removes this recognition sample. The recording and transcript are kept.', action: () => window.electronAPI.voices.deleteSample(sample.id, true) }) }}><Trash2 size={15} /></Button>
+        </div>)}</div> : <div className="voice-samples-empty"><Mic2 size={24} /><strong>No samples yet</strong><p>Name a speaker in a transcript to add one.</p></div>}
+      </section>
+    </div> : <div className="inline-empty">No remembered voices. Name a speaker in a transcript to add one.</div>}
+    <Dialog.Root open={mergeSourceId !== null} onOpenChange={open => { if (!open && !busy) { setMergeSourceId(null); setError('') } }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="confirmation-dialog voice-merge-dialog" onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
+      <div className="panel-heading"><Dialog.Title>Merge {mergeSource?.name ?? 'voice'}</Dialog.Title><Dialog.Close asChild><Button variant="ghost" aria-label="Close merge dialog" disabled={busy}><X size={18} /></Button></Dialog.Close></div>
+      <Dialog.Description>Combine samples and transcript names with another profile. Keeps the ten most recent samples.</Dialog.Description>
+      <label className="voice-merge-target">Merge into<select aria-label="Merge into voice profile" value={mergeTarget} disabled={busy} onChange={event => setMergeTarget(event.target.value)}><option value="">Choose a person</option>{profiles.filter(profile => profile.id !== mergeSourceId).map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+      {error && <p className="provider-error" role="alert">{error}</p>}
+      <div className="dialog-actions"><Button disabled={busy} onClick={() => { setMergeSourceId(null); setError('') }}>Cancel</Button><Button variant="primary" busy={busy} disabled={!mergeSource || !profiles.some(profile => profile.id === mergeTarget && profile.id !== mergeSourceId)} onClick={() => { if (mergeSource) void perform(() => window.electronAPI.voices.merge(mergeSource.id, mergeTarget)).then(success => { if (success) { setSelectedId(mergeTarget); setMergeSourceId(null) } }) }}>Merge voices</Button></div>
+    </Dialog.Content></Dialog.Portal></Dialog.Root>
+    <AlertDialog.Root open={confirmation !== null} onOpenChange={open => { if (!open && !busy) { setConfirmation(null); setError('') } }}><AlertDialog.Portal><AlertDialog.Overlay className="dialog-overlay" /><AlertDialog.Content className="confirmation-dialog" onEscapeKeyDown={event => { if (busy) event.preventDefault() }}>
+      <AlertDialog.Title>{confirmation?.title}</AlertDialog.Title><AlertDialog.Description>{confirmation?.description}</AlertDialog.Description>{error && <p className="provider-error" role="alert">{error}</p>}
+      <div className="dialog-actions"><AlertDialog.Cancel asChild><Button disabled={busy}>Cancel</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button variant="danger" busy={busy} onClick={event => { event.preventDefault(); if (confirmation) void perform(confirmation.action).then(success => { if (success) setConfirmation(null) }) }}>Confirm</Button></AlertDialog.Action></div>
+    </AlertDialog.Content></AlertDialog.Portal></AlertDialog.Root>
   </section>
 }

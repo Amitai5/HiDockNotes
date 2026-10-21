@@ -29,7 +29,7 @@ describe('subscription settings and consent UI', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Continue with ChatGPT' }))
     await screen.findByText('Complete sign-in in your browser…')
     expect(signIn).toHaveBeenCalledWith(null)
-    expect(screen.getByText(/ChatGPT plan usage does not support audio transcription/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('ChatGPT API key')).toBeNull()
   })
   it('offers the subscription for chat only and keeps local and API transcription choices visible', async () => {
     render(<AISettingsPanel />)

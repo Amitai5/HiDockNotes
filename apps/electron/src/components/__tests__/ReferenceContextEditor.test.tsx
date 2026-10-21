@@ -28,7 +28,7 @@ describe('reference context editors', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save global context' }))
     await screen.findByText('Context saved')
     expect(save).toHaveBeenCalledWith(null, { background: 'Shared business background', people: 'Dana Lee — operations', terminology: 'CRM — customer relationship management' }, 0)
-    expect(screen.getByText(/resummarize that recording/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Save global context' })).toBeDisabled()
   })
   it('loads project context only when opened and links to the global editor', async () => {
     get.mockResolvedValue({ content: { ...EMPTY_REFERENCE_CONTEXT, terminology: 'Existing term' }, version: 4, updatedAt: '2026-10-20T12:00:00Z' })

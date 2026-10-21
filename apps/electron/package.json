@@ -1,6 +1,6 @@
 {
   "name": "hidocknotes-app",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "A private recording library for HiDock devices.",
   "main": "out/main/index.js",
   "license": "MIT",

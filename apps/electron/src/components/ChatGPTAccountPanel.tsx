@@ -31,10 +31,10 @@ export function ChatGPTAccountPanel({ state, accept }: { state: AIState; accept(
   }
   return <div className="provider-card chatgpt-card">
     <div className="provider-heading"><h3>Use your ChatGPT plan</h3>{account?.planEnabled && <span className="status status-verified"><CheckCircle2 size={12} />Connected</span>}</div>
-    <p>Sign in with the ChatGPT account you use for Codex. Eligible summaries, action items and Assistant answers use your plan allowance or available credits.</p>
-    <small>Audio transcription uses Local Whisper on this computer by default. Gemini and OpenAI API transcription are optional. ChatGPT plan usage does not support audio transcription.</small>
+    <p>Use your plan for summaries and chat.</p>
+
     {!!account?.profiles.length && <label className="chatgpt-account-picker">ChatGPT account<select aria-label="ChatGPT account" value={account.activeProfileId ?? ''} disabled={busy || account.signingIn} onChange={event => { void perform(() => window.electronAPI.ai.chatgpt.select(event.target.value)) }}>{account.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.label} · {profile.email ?? profile.name ?? 'ChatGPT account'}{!profile.connected ? ' · signed out' : ''}</option>)}</select></label>}
-    {selected && <p className="chatgpt-account-status">{selected.connected ? selected.planEnabled ? 'ChatGPT plan usage is enabled.' : 'Signed in. Plan usage permission is not enabled; reconnect to authorize it.' : 'This connection is signed out. Continue with ChatGPT to reconnect.'}</p>}
+    {selected && !selected.planEnabled && <p className="chatgpt-account-status">{selected.connected ? 'Reconnect to enable plan access.' : 'Signed out.'}</p>}
     <div className="provider-tools chatgpt-actions">
       {account?.usageBlocked && <Button disabled={busy} onClick={() => { void perform(() => window.electronAPI.ai.chatgpt.resume()) }}>Retry plan requests</Button>}
       {account?.signingIn ? <><span role="status">Complete sign-in in your browser…</span><Button disabled={busy} onClick={() => { void perform(() => window.electronAPI.ai.chatgpt.cancelSignIn()) }}>Cancel sign-in</Button></> : <>
