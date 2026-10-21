@@ -87,7 +87,13 @@ jobs:
         run: npm run lint
       - name: Test
         run: npm test
-      - name: Build installer
+      # Omit certificate variables entirely for unsigned builds. An empty
+      # CSC_LINK is treated as a certificate file path by electron-builder.
+      - name: Build installer (unsigned)
+        if: env.HIDOCKNOTES_SIGNED_RELEASE != 'true'
+        run: npm run ${{ matrix.package }}
+      - name: Build installer (signed)
+        if: env.HIDOCKNOTES_SIGNED_RELEASE == 'true'
         run: npm run ${{ matrix.package }}
         env:
           WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE || '' }}
