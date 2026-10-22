@@ -33,6 +33,6 @@ export function BackupSettingsPanel(): JSX.Element {
       {state.phase === 'failed' && <p role="alert" className="danger">Backup could not be saved. {state.error}</p>}
     </div>
     <RestoreSettingsPanel backupBusy={active || choosing} />
-    <details className="settings-details"><summary>Backup details</summary><p>Includes local audio, notes, voices and settings. Keep backups private. Models, caches, incomplete downloads and device-only audio are excluded. Sign in again after restoring.</p></details>
+    <details className="settings-details"><summary>Backup details</summary><p>Includes local audio, notes, saved chats and sources, calendar links, voices and settings. Keep backups private. Models, caches, incomplete downloads and device-only audio are excluded. Reconnect accounts and calendars after restoring.</p></details>
   </section>
 }

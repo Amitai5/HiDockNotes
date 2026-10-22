@@ -12,10 +12,13 @@ import type { RestorePreview, RestoreState } from './restore'
 import type { TranscriptCandidateChoice, TranscriptReview } from './transcript'
 import type { UpdateState } from './updates'
 import type { ReferenceContext, ReferenceContextDocument } from './reference-context'
+import type { ConversationDetail, ConversationView } from './conversations'
+import type { SearchMatch, SearchMode, SemanticSearchState } from './semantic-search'
+import type { CalendarState, RecordingCalendar } from './calendar'
 
 export type Unsubscribe = () => void
 export type RecordingStatus = 'device-only' | 'downloaded' | 'queued' | 'converting' | 'diarizing' | 'transcribing' | 'identifying' | 'summarizing' | 'done' | 'failed' | 'empty'
-export interface RecordingView { id: string; filename: string; title: string | null; recordedAt: string; duration: number | null; size: number; status: RecordingStatus; verified: boolean; hasAudio: boolean; projectId: string | null; summary: string | null; queuePosition?: number | null; processingMode?: 'process' | 'summarize' | 'transcribe' | null; processingMessage?: string | null; processingProgress?: number | null }
+export interface RecordingView { id: string; filename: string; title: string | null; recordedAt: string; duration: number | null; size: number; status: RecordingStatus; verified: boolean; hasAudio: boolean; projectId: string | null; summary: string | null; queuePosition?: number | null; processingMode?: 'process' | 'summarize' | 'transcribe' | null; processingMessage?: string | null; processingProgress?: number | null; searchMatch?: SearchMatch }
 export interface TranscriptSegment { id: string; start: number; end: number; text: string; speakerId: string | null; speakerName: string | null }
 export interface RecordingDetail { recording: RecordingView; segments: TranscriptSegment[]; actionables: ActionableView[]; tags?: string[]; meeting?: MeetingOverview | null; speakerLimitReached?: boolean; expectedSpeakers?: number | null; deletionPending?: boolean; processing?: ProcessingView; speakers?: SpeakerView[] }
 export interface ProjectView { id: string; name: string; count: number }
@@ -26,6 +29,9 @@ export interface DeviceFile extends FileInfo { localVerified?: boolean; active?:
 export interface DownloadView { filename: string; fileSize: number; progress: number; status: 'pending' | 'downloading' | 'cancelling' | 'completed' | 'failed' | 'cancelled'; error?: string; cancelReason?: 'user' | 'interrupted' }
 export interface DownloadState { queue: DownloadView[]; isPaused: boolean; isProcessing: boolean }
 export interface ElectronAPI {
+  conversations: { current(): Promise<ConversationDetail | null>; select(id: string): Promise<ConversationDetail>; list(query?: string): Promise<ConversationView[]>; create(projectId: string | null): Promise<ConversationDetail>; get(id: string, before?: number): Promise<ConversationDetail>; rename(id: string, title: string, version: number): Promise<ConversationDetail>; delete(id: string, confirmed: boolean): Promise<void>; send(id: string, text: string, version: number): Promise<ConversationDetail>; cancel(id: string): Promise<void>; onChanged(callback: (id: string) => void): Unsubscribe }
+  semanticSearch: { state(): Promise<SemanticSearchState>; enable(): Promise<SemanticSearchState>; disable(): Promise<SemanticSearchState>; dismissSetup(): Promise<void>; removeModel(confirmed: boolean): Promise<SemanticSearchState>; search(query: string, status?: string, mode?: SearchMode): Promise<RecordingView[]>; onState(callback: (state: SemanticSearchState) => void): Unsubscribe }
+  calendar: { state(): Promise<CalendarState>; openSettings(): Promise<void>; connect(name: string, url: string): Promise<CalendarState>; refresh(id?: string): Promise<CalendarState>; disconnect(id: string, confirmed: boolean): Promise<CalendarState>; forRecording(id: string): Promise<RecordingCalendar>; link(recordingId: string, eventId: string | null): Promise<void>; useTitle(recordingId: string): Promise<void>; onChanged(callback: () => void): Unsubscribe }
   referenceContext: { get(projectId: string | null): Promise<ReferenceContextDocument>; save(projectId: string | null, content: ReferenceContext, version: number): Promise<ReferenceContextDocument> }
   updates: { state(): Promise<UpdateState>; check(): Promise<UpdateState>; download(): Promise<void>; install(confirmed: boolean): Promise<boolean>; openReleases(): Promise<void>; onState(cb: (state: UpdateState) => void): Unsubscribe }
   restore: { state(): Promise<RestoreState>; choose(): Promise<RestorePreview | null>; cancel(): Promise<void>; confirm(id: string, confirmed: boolean): Promise<boolean>; onState(cb: (state: RestoreState) => void): Unsubscribe }

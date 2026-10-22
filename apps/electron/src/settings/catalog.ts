@@ -2,6 +2,7 @@ export const SETTINGS_TABS = [
   { id: 'general', label: 'General' },
   { id: 'ai', label: 'AI & transcription' },
   { id: 'voices', label: 'Voices' },
+  { id: 'calendars', label: 'Calendars' },
   { id: 'device', label: 'Device & storage' },
   { id: 'agents', label: 'Agent connections' },
   { id: 'about', label: 'About' }
@@ -9,6 +10,8 @@ export const SETTINGS_TABS = [
 export type SettingsTab = typeof SETTINGS_TABS[number]['id']
 interface SettingSearchEntry { id: string; tab: SettingsTab; title: string; description: string; keywords: string }
 export const SETTINGS_CATALOG: readonly SettingSearchEntry[] = [
+  { id: 'meaning-search', tab: 'ai', title: 'Local meaning search', description: 'Optional private search model and index.', keywords: 'semantic meaning search embedding model download optional offline local english index remove' },
+  { id: 'google-calendar', tab: 'calendars', title: 'Google Calendar', description: 'Connect a private calendar feed and link meetings.', keywords: 'calendar google meeting invite invitees organizer agenda private ical link events refresh sync' },
   { id: 'your-name', tab: 'general', title: 'Your name', description: 'Your name, saved on this computer.', keywords: 'profile display name' },
   { id: 'appearance', tab: 'general', title: 'Appearance', description: 'Choose light, dark, or system theme.', keywords: 'theme light dark mode color system' },
   { id: 'global-context', tab: 'general', title: 'Global context & terminology', description: 'Background, people, organizations, acronyms, and preferred spellings shared across projects.', keywords: 'reference knowledge glossary global context project background terminology people participant client organization product acronym spelling assistant summary' },

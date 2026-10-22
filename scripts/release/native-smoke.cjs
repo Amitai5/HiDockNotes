@@ -15,6 +15,12 @@ function smoke(resources) {
   } finally { database.close() }
   assert.equal(typeof load('usb').findByIds, 'function')
   assert.equal(typeof load('sherpa-onnx-node').OfflineRecognizer, 'function')
+  assert.equal(typeof load('ical.js').parse, 'function')
+  // Speech and search use different ONNX runtimes; match the app's worker
+  // isolation instead of loading both DLL versions into one Windows process.
+  const searchCheck = spawnSync(process.execPath, [__filename, '--search-runtime', ...(resources ? [resources] : [])], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60000, windowsHide: true })
+  if (searchCheck.error) { throw searchCheck.error }
+  assert.equal(searchCheck.status, 0, searchCheck.stderr)
   assert.equal(typeof load('electron-updater').NsisUpdater, 'function')
   assert.ok(fs.statSync(path.join(path.dirname(load.resolve('electron-updater/package.json')), 'LICENSE')).size > 0, 'updater license')
   const ffmpeg = load('ffmpeg-static').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`)
@@ -28,11 +34,11 @@ function smoke(resources) {
     if (policy.signed) { assert.match(policy.publicKey, /BEGIN PUBLIC KEY/) }
     assert.equal(load('./package.json').version, readVersion())
     for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'mcp-launcher.cjs']) { assert.ok(fs.statSync(path.join(resources, file)).size > 0, file) }
-    for (const file of ['out/main/index.js', 'out/main/transcription-worker.js', 'out/preload/index.js', 'out/renderer/index.html']) {
+    for (const file of ['out/main/index.js', 'out/main/transcription-worker.js', 'out/main/embedding-worker.js', 'out/main/calendar-worker.js', 'out/preload/index.js', 'out/renderer/index.html']) {
       assert.ok(fs.statSync(path.join(resources, 'app.asar', file)).size > 0, file)
     }
   }
-  console.log(`Native smoke passed for ${process.platform}-${process.arch}${resources ? ' (packaged Electron)' : ' (Node)'}. SQLite/FTS, USB binding, speech runtime, updater and ffmpeg loaded.`)
+  console.log(`Native smoke passed for ${process.platform}-${process.arch}${resources ? ' (packaged Electron)' : ' (Node)'}. SQLite/FTS, USB binding, speech and search runtimes, calendar parser, updater and ffmpeg loaded.`)
 }
 
 function packagedSmoke() {
@@ -56,7 +62,12 @@ function packagedSmoke() {
 
 if (require.main === module) {
   try {
-    if (process.argv[2] === '--packaged') { packagedSmoke() }
+    if (process.argv[2] === '--search-runtime') {
+      const resources = process.argv[3]
+      const load = createRequire(resources ? path.join(resources, 'app.asar', 'package.json') : path.join(root, 'apps/electron/package.json'))
+      assert.equal(typeof load('@huggingface/transformers').pipeline, 'function')
+    }
+    else if (process.argv[2] === '--packaged') { packagedSmoke() }
     else { smoke(process.argv[2] === '--resources' ? process.argv[3] : undefined) }
   } catch (error) { console.error(error.message); process.exitCode = 1 }
 }

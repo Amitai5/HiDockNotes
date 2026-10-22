@@ -63,7 +63,7 @@ describe('complete library backups', () => {
     const result = await service.create(target)
     expect(result).toMatchObject({ filePath: target, recordings: 1, changedAudio: 0 })
     const files = entries(await readFile(target)), manifest = JSON.parse(files.get('manifest.json')!.toString())
-    expect(manifest).toMatchObject({ formatVersion: 1, appVersion: '0.9.0', databaseSchema: 11, createdAt: date, counts: { recordings: 1, transcripts: 1, segments: 1, speakers: 1, voice_profiles: 1, voice_samples: 1, actionables: 1, recording_tags: 1, projects: 1 } })
+    expect(manifest).toMatchObject({ formatVersion: 1, appVersion: '0.9.0', databaseSchema: 12, createdAt: date, counts: { recordings: 1, transcripts: 1, segments: 1, speakers: 1, voice_profiles: 1, voice_samples: 1, actionables: 1, recording_tags: 1, projects: 1 } })
     expect(manifest.recordings.find((row: { recordingId: string }) => row.recordingId === id)).toMatchObject({ originalPath: join(external, 'renamed.wav'), archivePath: 'recordings/audio-1.wav', expectedSha256: sha(audio) })
     expect(files.get('recordings/audio-1.wav')).toEqual(audio)
     expect(Array.from(files.keys()).filter(name => name.startsWith('recordings/'))).toHaveLength(1)

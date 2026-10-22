@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AudioLines, Check, ChevronRight, FolderOpen, Info, Mic2, Monitor, Moon, Plug, Search, Sun, UserRound, X } from 'lucide-react'
+import { AudioLines, CalendarDays, Check, ChevronRight, FolderOpen, Info, Mic2, Monitor, Moon, Plug, Search, Sun, UserRound, X } from 'lucide-react'
 import { Button, EmptyState, Toggle } from '../components/ui'
 import { reportError, updateSettings, useAppStore } from '../store/useAppStore'
 import product from '../../product.json'
@@ -11,8 +11,10 @@ import { BackupSettingsPanel } from '../components/BackupSettingsPanel'
 import { UpdatesSettingsPanel } from '../components/UpdatesSettingsPanel'
 import { GlobalReferenceContext } from '../components/ReferenceContextEditor'
 import { SETTINGS_TABS, searchSettings, type SettingsTab } from '../settings/catalog'
+import { SemanticSearchSettings } from '../components/SemanticSearchSettings'
+import { CalendarSettings } from '../components/CalendarSettings'
 
-const tabIcons = { general: UserRound, ai: AudioLines, voices: Mic2, device: FolderOpen, agents: Plug, about: Info }
+const tabIcons = { general: UserRound, ai: AudioLines, voices: Mic2, calendars: CalendarDays, device: FolderOpen, agents: Plug, about: Info }
 export function SettingsPage(): JSX.Element {
   const settings = useAppStore(s => s.settings)
   const [params, setParams] = useSearchParams()
@@ -50,7 +52,8 @@ export function SettingsPage(): JSX.Element {
       <section className="settings-section" id="appearance" tabIndex={-1}><h2>Appearance</h2><div className="appearance-options">{([{ value: 'light', label: 'Light', Icon: Sun }, { value: 'dark', label: 'Dark', Icon: Moon }, { value: 'system', label: 'System', Icon: Monitor }] as const).map(({ value, label, Icon }) => <button key={value} className={settings?.appearance === value ? 'selected' : ''} onClick={() => { void updateSettings({ appearance: value }) }}><Icon size={20} />{label}{settings?.appearance === value && <Check size={14} />}</button>)}</div></section>
       <GlobalReferenceContext />
     </div>
-    <div hidden={!!query.trim() || tab !== 'ai'} role="tabpanel" id="settings-panel-ai" aria-labelledby="settings-tab-ai"><AISettingsPanel sections={['providers', 'transcription']} /></div>
+    <div hidden={!!query.trim() || tab !== 'ai'} role="tabpanel" id="settings-panel-ai" aria-labelledby="settings-tab-ai"><AISettingsPanel sections={['providers', 'transcription']} /><SemanticSearchSettings /></div>
+    <div hidden={!!query.trim() || tab !== 'calendars'} role="tabpanel" id="settings-panel-calendars" aria-labelledby="settings-tab-calendars"><CalendarSettings /></div>
     <div hidden={!!query.trim() || tab !== 'voices'} role="tabpanel" id="settings-panel-voices" aria-labelledby="settings-tab-voices"><VoiceProfilesPanel /><AISettingsPanel sections={['thresholds']} /></div>
     <div hidden={!!query.trim() || tab !== 'device'} role="tabpanel" id="settings-panel-device" aria-labelledby="settings-tab-device">
       <section className="settings-section" id="device-preferences" tabIndex={-1}><h2>Device preferences</h2><div className="setting-row"><div><strong>Connect automatically</strong></div><Toggle label="Connect automatically" checked={settings?.autoConnect ?? true} onChange={value => { void updateSettings({ autoConnect: value }) }} /></div><div className="setting-row"><div><strong>Auto-download new recordings</strong></div><Toggle label="Auto-download new recordings" checked={settings?.autoDownload ?? true} onChange={value => { void updateSettings({ autoDownload: value }) }} /></div></section>

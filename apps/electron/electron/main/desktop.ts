@@ -41,6 +41,14 @@ import { LibraryRestoreService, applyPendingRestore } from './services/library-r
 import { registerRestoreHandlers, type MaintenanceRequest } from './ipc/restore-handlers'
 import { registerTranscriptHandlers } from './ipc/transcript-handlers'
 import { registerUpdateHandlers } from './ipc/update-handlers'
+import { SemanticSearch } from './search/semantic-search'
+import { UtilityEmbeddingRunner } from './search/embedding-runner'
+import { searchModelDirectory } from './search/semantic-model'
+import { registerSemanticHandlers } from './ipc/semantic-handlers'
+import { CalendarService } from './calendar/calendar-service'
+import { parseCalendarInWorker } from './calendar/calendar-worker-runner'
+import { registerCalendarHandlers } from './ipc/calendar-handlers'
+import type { AssistantConversations } from './services/assistant-conversations'
 
 app.setName(product.name)
 app.setAppUserModelId(product.appId)
@@ -54,6 +62,9 @@ let agentAccess: AgentAccessController | undefined
 let recordingDeletion: RecordingDeletionService | undefined
 let libraryBackup: LibraryBackupService | undefined
 let libraryRestore: LibraryRestoreService | undefined
+let semanticSearch: SemanticSearch | undefined
+let calendars: CalendarService | undefined
+let conversations: AssistantConversations | undefined
 let maintenanceAction: (() => Promise<void>) | undefined
 let maintenanceFinish: (() => void) | undefined
 const requestMaintenance: MaintenanceRequest = (action, finish) => {
@@ -92,6 +103,12 @@ async function createWindow(): Promise<void> {
   libraryBackup = registerBackupHandlers(window)
   const encryption = { isAvailable: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'), encrypt: (value: string) => safeStorage.encryptString(value), decrypt: (value: Buffer) => safeStorage.decryptString(value) }
   const vault = new CredentialVault(encryption)
+  semanticSearch = new SemanticSearch({ dataPath: app.getPath('userData'), runner: new UtilityEmbeddingRunner(searchModelDirectory(app.getPath('userData'))), changed: state => { if (window && !window.isDestroyed()) window.webContents.send('semantic:state', state) } })
+  registerSemanticHandlers(semanticSearch)
+  await semanticSearch.initialize()
+  recordingEvents.on('changed', () => semanticSearch?.scheduleIndex())
+  calendars = new CalendarService({ encryption, parse: parseCalendarInWorker, changed: () => { if (window && !window.isDestroyed()) window.webContents.send('calendar:changed') }, libraryChanged })
+  registerCalendarHandlers(calendars, () => shell.openExternal('https://calendar.google.com/calendar/u/0/r/settings'))
   const agentTools = new LibraryAgentTools({ all: queryAll, one: queryOne })
   agentAccess = new AgentAccessController({
     readEnabled: () => queryOne<{ value: string }>("SELECT value FROM settings WHERE key='agent-mcp-enabled'")?.value === 'true',
@@ -121,7 +138,7 @@ async function createWindow(): Promise<void> {
   registerUpdateHandlers(window, libraryBackup, requestMaintenance)
   recordingDeletion = new RecordingDeletionService({ dataPath: app.getPath('userData'), device: getDevicePipelineService(), pause: (id, operation) => transcriptionQueue!.withRecordingPaused(id, operation), waitPlayback: waitForPlayback, dismissDownload: filename => { getDownloadService().dismissTerminal(filename) }, changed: libraryChanged })
   registerRecordingControls(recordingDeletion, libraryChanged)
-  registerAIHandlers(transcriptionQueue, vault, providers, libraryChanged, chatgpt, url => shell.openExternal(url))
+  conversations = registerAIHandlers(transcriptionQueue, vault, providers, libraryChanged, chatgpt, url => shell.openExternal(url), semanticSearch, id => { if (window && !window.isDestroyed()) window.webContents.send('conversations:changed', id) })
   recordingEvents.on('verified', id => transcriptionQueue?.enqueue(id))
   registerDevicePipelineHandlers()
   registerTruncatedRecoveryHandlers()
@@ -137,6 +154,7 @@ async function createWindow(): Promise<void> {
   else await window.loadFile(join(__dirname, '../renderer/index.html'))
   emitActivityLog('info', `${product.name} is ready.`)
   transcriptionQueue.start()
+  calendars.start()
   const pipeline = getDevicePipelineService()
   pipeline.on('state', state => { if (state.phase === 'idle') startRecordingPoll() })
   if (!restoreReview) await pipeline.initAutoConnect().catch(error => emitActivityLog('error', error instanceof Error ? error.message : 'Could not connect to the recorder.'))
@@ -163,7 +181,8 @@ app.on('before-quit', event => {
   const pipeline = getDevicePipelineService()
   pipeline.removeAutoConnect()
   recordingEvents.removeAllListeners('verified')
-  void Promise.allSettled([pipeline.disconnect(), transcriptionQueue?.stop(), agentAccess?.close(), recordingDeletion?.drain(), libraryBackup?.stop(), maintenanceAction ? undefined : libraryRestore?.stop()]).then(async results => {
+  recordingEvents.removeAllListeners('changed')
+  void Promise.allSettled([pipeline.disconnect(), transcriptionQueue?.stop(), agentAccess?.close(), recordingDeletion?.drain(), libraryBackup?.stop(), semanticSearch?.stop(), calendars?.stop(), conversations?.stop(), maintenanceAction ? undefined : libraryRestore?.stop()]).then(async results => {
     getDownloadService().destroy()
     try {
       if (maintenanceAction) {

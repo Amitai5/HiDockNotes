@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import product from '../../../product.json'
 import { getSettings, saveSettings, listRecordings, getDetail, listProjects, createProject, listActionables, markRecordingDownloaded, remeasureRecordingDuration, getRecordingByFilename, renameRecording } from '../services/database'
 import { assignRecordingProject, setRecordingTags } from '../services/recording-metadata'
-import { recordingReady } from '../services/recording-events'
+import { recordingEvents, recordingReady } from '../services/recording-events'
 import { getRecordingsPath, saveRecording } from '../services/file-storage'
 import { getDataPath } from '../services/config'
 import { getDevicePipelineService } from '../services/device-pipeline-instance'
@@ -23,7 +23,7 @@ import { registerClipboardHandler } from './clipboard-handlers'
 import { registerReferenceContextHandlers } from './reference-context-handlers'
 
 export function readSettings(): AppSettings { return getSettings(join(getDataPath(), 'recordings')) }
-export function libraryChanged(): void { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('library:changed') }
+export function libraryChanged(): void { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('library:changed'); recordingEvents.emit('changed') }
 const changed = libraryChanged
 export function registerAppHandlers(window: BrowserWindow): void {
   registerClipboardHandler()

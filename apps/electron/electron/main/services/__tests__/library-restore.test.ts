@@ -15,6 +15,7 @@ import { editTranscript, transcriptReview } from '../transcript-revisions'
 import { DEFAULT_AI_SETTINGS } from '../../../../src/shared/ai'
 import { readReferenceContext, saveReferenceContext } from '../reference-context'
 import { EMPTY_REFERENCE_CONTEXT } from '../../../../src/shared/reference-context'
+import { removeSchema12 } from './schema-fixtures'
 
 let root: string, data: string, archive: string, id: string, restore: LibraryRestoreService, backups: LibraryBackupService
 const audio = Buffer.from('fixture original audio, never a real recording'), date = '2026-10-20T10:00:00.000Z'
@@ -69,7 +70,7 @@ describe('verified, recoverable library restore', () => {
     initializeDatabase(join(data, 'data', 'library.db'))
     expect(readReferenceContext(null)).toEqual(global)
     expect(readReferenceContext(project.id)).toEqual(scoped)
-    expect(getDatabase().pragma('user_version', { simple: true })).toBe(11)
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(12)
   })
   it('fails on corrupt or truncated audio and leaves the current database intact', async () => {
     const bytes = gunzipSync(await readFile(archive)), index = bytes.indexOf(audio)
@@ -107,15 +108,47 @@ describe('verified, recoverable library restore', () => {
     expect(getDetail(id).recording.title).toBe('Archived meeting')
   })
   it('restores a backup from the previous schema and migrates it after the verified handoff', async () => {
+    removeSchema12()
     getDatabase().exec('DROP TABLE transcript_revisions; DROP TABLE transcript_corrections; DROP TABLE transcript_candidates; ALTER TABLE recording_overviews DROP COLUMN summary_version; PRAGMA user_version=10')
     await backups.create(archive)
     const preview = await restore.prepare(archive)
     await restore.schedule(preview!.id); closeDatabase()
     expect(applyPendingRestore(data)).toBe(true)
     initializeDatabase(join(data, 'data', 'library.db'))
-    expect(getDatabase().pragma('user_version', { simple: true })).toBe(11)
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(12)
     expect(getDetail(id).segments[0].text).toBe('Corrected words')
     expect(getDetail(id).actionables[0].done).toBe(true)
+  })
+  it('round-trips saved chats, messages and citations with calendar links, then disconnects calendar secrets and pauses optional search', async () => {
+    const citations = JSON.stringify([{ number: 1, recordingId: id, title: 'Archived meeting', start: 0, excerpt: 'Corrected words' }])
+    run("INSERT INTO assistant_conversations(id,title,created_at,updated_at,version) VALUES ('chat','Planning discussion',?,?,1)", [date, date])
+    run("INSERT INTO assistant_messages VALUES ('question','chat',0,'user','What changed?','[]',?)", [date])
+    run("INSERT INTO assistant_messages VALUES ('answer','chat',1,'assistant','The words were corrected. [1]',?,?)", [citations, date])
+    run("INSERT INTO calendar_sources(id,name,feed_hash,ciphertext,created_at) VALUES ('calendar','Work','hash',?,?)", [Buffer.from('encrypted-private-link'), date])
+    run("INSERT INTO calendar_events(id,source_id,event_key,title,description,location,start,end) VALUES ('event','calendar','key','Planning','Agenda','Office',?,?)", [date, date])
+    run("INSERT INTO recording_calendar VALUES (?,'event')", [id])
+    run("INSERT OR REPLACE INTO settings VALUES ('semantic-enabled','true')")
+    await backups.create(archive)
+    run("DELETE FROM assistant_conversations")
+    const preview = await restore.prepare(archive)
+    expect(preview!.counts).toMatchObject({ assistant_conversations: 1, assistant_messages: 2, calendar_sources: 1, calendar_events: 1, recording_calendar: 1 })
+    await restore.schedule(preview!.id); closeDatabase(); expect(applyPendingRestore(data)).toBe(true)
+    initializeDatabase(join(data, 'data', 'library.db'))
+    expect(queryOne('SELECT title,version FROM assistant_conversations')).toEqual({ title: 'Planning discussion', version: 1 })
+    expect(queryOne('SELECT content,citations FROM assistant_messages WHERE role=\'assistant\'')).toEqual({ content: 'The words were corrected. [1]', citations })
+    expect(queryOne('SELECT ciphertext FROM calendar_sources')).toEqual({ ciphertext: null })
+    expect(queryOne('SELECT event_id FROM recording_calendar WHERE recording_id=?', [id])).toEqual({ event_id: 'event' })
+    expect(queryOne("SELECT value FROM settings WHERE key='semantic-enabled'")).toEqual({ value: 'false' })
+  })
+  it('restores a schema 11 library without requiring chat, search, or calendar tables', async () => {
+    removeSchema12(); getDatabase().pragma('user_version = 11')
+    await backups.create(archive)
+    const preview = await restore.prepare(archive)
+    await restore.schedule(preview!.id); closeDatabase(); applyPendingRestore(data)
+    initializeDatabase(join(data, 'data', 'library.db'))
+    expect(getDetail(id).segments[0].text).toBe('Corrected words')
+    expect(queryOne('SELECT count(*) AS count FROM assistant_conversations')).toEqual({ count: 0 })
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(12)
   })
   it('rejects an unknown trigger even when the archive and database hashes are otherwise valid', async () => {
     getDatabase().exec("CREATE TRIGGER unexpected_update AFTER UPDATE ON recordings BEGIN DELETE FROM actionables; END")

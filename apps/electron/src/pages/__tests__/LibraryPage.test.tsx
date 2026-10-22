@@ -69,7 +69,7 @@ describe('project folders inside Library', () => {
     show()
     expect(await within(screen.getByRole('main')).findByRole('link', { name: /Project call/ })).toBeVisible()
     expect(within(screen.getByRole('main')).getByRole('region', { name: 'Project folders' })).toBeVisible()
-    expect(screen.getByText('Across all folders and unfiled recordings')).toBeVisible()
+    expect(screen.getByText('All folders')).toBeVisible()
   })
   it('creates project folders from Library and leaves errors visible', async () => {
     show()

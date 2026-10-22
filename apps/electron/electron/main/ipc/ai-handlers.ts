@@ -10,10 +10,15 @@ import type { ChatMessage } from '../../../src/shared/ai'
 import type { ChatGPTAuth } from '../ai/chatgpt-auth'
 import { CHATGPT_USAGE } from '../ai/chatgpt-protocol'
 import { readAISettings } from '../ai/settings'
+import { AssistantConversations } from '../services/assistant-conversations'
+import { registerConversationHandlers } from './conversation-handlers'
+import type { SemanticSearch } from '../search/semantic-search'
 
-export function registerAIHandlers(queue: TranscriptionQueue, vault: CredentialVault, providers: ProviderFactory, changed: () => void, chatgpt: ChatGPTAuth, openBrowser: (url: string) => Promise<void>): void {
+export function registerAIHandlers(queue: TranscriptionQueue, vault: CredentialVault, providers: ProviderFactory, changed: () => void, chatgpt: ChatGPTAuth, openBrowser: (url: string) => Promise<void>, search?: SemanticSearch, conversationChanged: (id: string) => void = () => undefined): AssistantConversations {
   const verifying = new Set<string>()
-  const assistant = new RecordingAssistant(vault, providers)
+  const assistant = new RecordingAssistant(vault, providers, search ? (query, project, signal) => search.citations(query, project, signal) : undefined)
+  const conversations = new AssistantConversations({ answer: (question, project, history, signal) => assistant.ask(question, project, history, signal), changed: conversationChanged })
+  registerConversationHandlers(conversations)
   let chatting = false
   handle('assistant:ask', async (question, project, history) => {
     const text = validateText(question, 4000)
@@ -83,4 +88,5 @@ export function registerAIHandlers(queue: TranscriptionQueue, vault: CredentialV
   handle('voices:merge', (source, target) => { mergeVoiceProfiles(validateId(source), validateId(target)); changed() })
   handle('voices:delete', (id, confirmed) => { if (!validateBoolean(confirmed)) throw new Error('Confirm before deleting a voice profile.'); deleteVoiceProfile(validateId(id)); changed() })
   handle('voices:delete-sample', (id, confirmed) => { if (!validateBoolean(confirmed)) throw new Error('Confirm before deleting a voice sample.'); deleteVoiceSample(validateId(id)); changed() })
+  return conversations
 }

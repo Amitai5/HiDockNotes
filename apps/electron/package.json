@@ -1,6 +1,6 @@
 {
   "name": "hidocknotes-app",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "A private recording library for HiDock devices.",
   "main": "out/main/index.js",
   "license": "MIT",
@@ -19,12 +19,14 @@
   "dependencies": {
     "@google/genai": "2.28.0",
     "@hidock/jensen-protocol": "file:../../packages/jensen-protocol",
+    "@huggingface/transformers": "4.3.1",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-switch": "^1.1.1",
     "better-sqlite3": "13.0.3",
     "electron-updater": "6.8.9",
     "ffmpeg-static": "5.3.0",
+    "ical.js": "2.2.1",
     "lucide-react": "0.460.0",
     "openai": "7.30.0",
     "react": "18.3.1",

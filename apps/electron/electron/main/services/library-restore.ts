@@ -99,6 +99,8 @@ export class LibraryRestoreService {
         db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES ('agent-mcp-enabled','false')").run()
         db.prepare('DELETE FROM provider_credentials').run()
         db.prepare("UPDATE chatgpt_profiles SET ciphertext=NULL,blocked_reason=NULL,logout_warning=NULL").run()
+        if (this.manifest!.databaseSchema >= 12) db.prepare('UPDATE calendar_sources SET ciphertext=NULL').run()
+        db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES ('semantic-enabled','false')").run()
         db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES ('recordingsPath',?)").run(JSON.stringify(join(this.dependencies.dataPath, 'recordings')))
       })()
       db.pragma('wal_checkpoint(TRUNCATE)')

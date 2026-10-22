@@ -71,7 +71,29 @@ const migrations = [
    CREATE INDEX transcript_revisions_recording ON transcript_revisions(recording_id, version);
    CREATE TABLE transcript_corrections (recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, segment_id TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL, PRIMARY KEY(recording_id,segment_id));
    CREATE TABLE transcript_candidates (recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE, created_at TEXT NOT NULL, checkpoint TEXT NOT NULL, settings TEXT NOT NULL);
-   ALTER TABLE recording_overviews ADD COLUMN summary_version INTEGER NOT NULL DEFAULT 0;`
+   ALTER TABLE recording_overviews ADD COLUMN summary_version INTEGER NOT NULL DEFAULT 0;`,
+  `CREATE TABLE assistant_conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL, title_manual INTEGER NOT NULL DEFAULT 0, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 0, draft TEXT NOT NULL DEFAULT '');
+   CREATE INDEX assistant_conversations_updated ON assistant_conversations(updated_at DESC);
+   CREATE TABLE assistant_messages (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES assistant_conversations(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, role TEXT NOT NULL CHECK(role IN ('user','assistant')), content TEXT NOT NULL, citations TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(citations)), created_at TEXT NOT NULL, UNIQUE(conversation_id,ordinal));
+   CREATE TRIGGER assistant_source_deleted BEFORE DELETE ON recordings BEGIN
+     UPDATE assistant_conversations SET version=version+1 WHERE id IN (SELECT m.conversation_id FROM assistant_messages m,json_each(m.citations) c WHERE json_extract(c.value,'$.recordingId')=old.id);
+     UPDATE assistant_messages SET content='This answer was removed because a source recording was deleted.',citations='[]' WHERE id IN (SELECT m.id FROM assistant_messages m,json_each(m.citations) c WHERE json_extract(c.value,'$.recordingId')=old.id);
+   END;
+   CREATE TABLE semantic_documents (recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, model TEXT NOT NULL, indexed_at TEXT NOT NULL);
+   CREATE TABLE semantic_chunks (id INTEGER PRIMARY KEY, recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE, position INTEGER NOT NULL, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('transcript','summary')), embedding BLOB NOT NULL, UNIQUE(recording_id,position));
+   CREATE INDEX semantic_chunks_recording ON semantic_chunks(recording_id);
+   CREATE TABLE calendar_sources (id TEXT PRIMARY KEY, name TEXT NOT NULL, feed_hash TEXT NOT NULL UNIQUE, ciphertext BLOB, last_synced_at TEXT, error TEXT, created_at TEXT NOT NULL);
+   CREATE TABLE calendar_events (id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES calendar_sources(id) ON DELETE CASCADE, event_key TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, location TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, all_day INTEGER NOT NULL DEFAULT 0, organizer TEXT, invitees TEXT NOT NULL DEFAULT '[]', cancelled INTEGER NOT NULL DEFAULT 0, available INTEGER NOT NULL DEFAULT 1, UNIQUE(source_id,event_key));
+   CREATE INDEX calendar_events_start ON calendar_events(start,end);
+   CREATE TABLE recording_calendar (recording_id TEXT PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE, event_id TEXT NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE);
+   CREATE TRIGGER semantic_transcript_updated AFTER UPDATE OF text ON transcripts BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;
+   CREATE TRIGGER semantic_transcript_inserted AFTER INSERT ON transcripts BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;
+   CREATE TRIGGER semantic_transcript_deleted AFTER DELETE ON transcripts BEGIN DELETE FROM semantic_documents WHERE recording_id=old.recording_id; END;
+   CREATE TRIGGER semantic_title_updated AFTER UPDATE OF title,filename ON recordings BEGIN DELETE FROM semantic_documents WHERE recording_id=new.id; END;
+   CREATE TRIGGER semantic_summary_updated AFTER UPDATE OF text ON summaries BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;
+   CREATE TRIGGER semantic_summary_inserted AFTER INSERT ON summaries BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;
+   CREATE TRIGGER semantic_summary_deleted AFTER DELETE ON summaries BEGIN DELETE FROM semantic_documents WHERE recording_id=old.recording_id; END;
+   CREATE TRIGGER semantic_speaker_updated AFTER UPDATE OF label ON speakers BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;`
 ]
 
 export const DATABASE_SCHEMA_VERSION = migrations.length
