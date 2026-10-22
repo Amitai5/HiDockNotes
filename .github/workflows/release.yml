@@ -36,8 +36,49 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  build:
+  validate:
     needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    name: Test and compile once
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install pinned npm
+        run: npm install --global npm@11.21.0 --ignore-scripts
+      - name: Install locked dependencies
+        run: npm ci --strict-allow-scripts
+      - name: Check versions
+        run: npm run release:check
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Compile shared application
+        run: npm run build
+      # These files contain JavaScript, declarations and renderer assets only.
+      # Native dependencies are installed independently on every target runner.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compiled-app-${{ needs.prepare.outputs.commit }}
+          path: |
+            apps/electron/out/
+            packages/jensen-protocol/dist/
+          if-no-files-found: error
+          retention-days: 2
+
+  build:
+    needs: [prepare, validate]
     if: needs.prepare.outputs.publish == 'true'
     name: Build ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
@@ -75,26 +116,42 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install pinned npm
         run: npm install --global npm@11.21.0 --ignore-scripts
+      - name: Set packaging cache paths
+        shell: bash
+        run: |
+          echo "ELECTRON_CACHE=$RUNNER_TEMP/electron-cache" >> "$GITHUB_ENV"
+          echo "ELECTRON_BUILDER_CACHE=$RUNNER_TEMP/electron-builder-cache" >> "$GITHUB_ENV"
+      - name: Cache native downloads and packaging tools
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+            ~/.cache/ffmpeg-static-nodejs
+            ~/Library/Caches/ffmpeg-static-nodejs
+            ~/AppData/Local/ffmpeg-static-nodejs/Cache
+          key: electron-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/electron/package.json') }}
+          restore-keys: electron-tools-${{ runner.os }}-${{ runner.arch }}-
       - name: Install locked dependencies and native binaries
-        run: npm ci --strict-allow-scripts
+        run: npm ci --strict-allow-scripts --no-audit --no-fund
+      - name: Download tested application
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compiled-app-${{ needs.prepare.outputs.commit }}
+          path: .
+          digest-mismatch: error
       - name: Check versions and native modules
         run: |
           npm run release:check
           npm run smoke:native
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm test
       # Omit certificate variables entirely for unsigned builds. An empty
       # CSC_LINK is treated as a certificate file path by electron-builder.
       - name: Build installer (unsigned)
         if: env.HIDOCKNOTES_SIGNED_RELEASE != 'true'
-        run: npm run ${{ matrix.package }}
+        run: npm run ${{ matrix.package }} --workspace=apps/electron
       - name: Build installer (signed)
         if: env.HIDOCKNOTES_SIGNED_RELEASE == 'true'
-        run: npm run ${{ matrix.package }}
+        run: npm run ${{ matrix.package }} --workspace=apps/electron
         env:
           WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE || '' }}
           WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}

@@ -224,6 +224,8 @@ Packages are written to `release/<version>/`. Run `npm run smoke:package` after 
 
 [Build installers and release](https://github.com/Amitai5/HiDockNotes/actions/workflows/release.yml) runs on pushes to `production` and supports manual runs from that branch. For a new version, use `npm run release:version -- 0.13.1` as an example, run `npm run release:check`, then commit and push the intended changes. Choose an unpublished version; existing public versions are skipped.
 
+The workflow typechecks, lints, runs the complete test suite, and compiles the Vite application once. Four parallel packaging jobs reuse that exact commit's compiled output, install native dependencies on their own Windows/Linux/macOS runners, and check real CPU inference before and after packaging. npm downloads and per-platform Electron, FFmpeg and packaging tools are cached; installers omit unused ONNX platforms and architectures. Intel Mac support uses a pinned compatible ONNX runtime.
+
 The workflow tests and packages Windows x64, Linux x64, Intel Mac, and Apple Silicon Mac separately. After all four builds and packaged checks succeed, it publishes the five installers and `SHA256SUMS.txt` to a GitHub release tagged at the tested commit. Signing and notarization configuration is documented in the [release signing guide](docs/backup-transcripts-updates.md#configure-signed-releases).
 
 ### Architecture

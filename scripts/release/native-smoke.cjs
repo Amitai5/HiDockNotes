@@ -20,7 +20,7 @@ function smoke(resources) {
   // isolation instead of loading both DLL versions into one Windows process.
   const searchCheck = spawnSync(process.execPath, [__filename, '--search-runtime', ...(resources ? [resources] : [])], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60000, windowsHide: true })
   if (searchCheck.error) { throw searchCheck.error }
-  assert.equal(searchCheck.status, 0, searchCheck.stderr)
+  if (searchCheck.status !== 0) { throw new Error(`Search runtime check failed for ${process.platform}-${process.arch}:\n${searchCheck.stderr}`) }
   assert.equal(typeof load('electron-updater').NsisUpdater, 'function')
   assert.ok(fs.statSync(path.join(path.dirname(load.resolve('electron-updater/package.json')), 'LICENSE')).size > 0, 'updater license')
   const ffmpeg = load('ffmpeg-static').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`)
@@ -29,6 +29,10 @@ function smoke(resources) {
   assert.equal(conversion.status, 0, conversion.stderr)
   assert.match(conversion.stdout, /ffmpeg version/)
   if (resources) {
+    const searchLoad = createRequire(load.resolve('@huggingface/transformers'))
+    const runtime = path.join(path.dirname(searchLoad.resolve('onnxruntime-node/package.json')), 'bin/napi-v6')
+    assert.deepEqual(fs.readdirSync(runtime), [process.platform], 'installer contains only its own ONNX platform')
+    assert.deepEqual(fs.readdirSync(path.join(runtime, process.platform)), [process.arch], 'installer contains only its own ONNX architecture')
     const policy = load('./resources/update-policy.json')
     assert.equal(typeof policy.signed, 'boolean')
     if (policy.signed) { assert.match(policy.publicKey, /BEGIN PUBLIC KEY/) }
@@ -60,14 +64,25 @@ function packagedSmoke() {
   if (result.status !== 0) { throw new Error(`Packaged native smoke failed (exit ${result.status}, signal ${result.signal}).`) }
 }
 
-if (require.main === module) {
+async function searchRuntimeSmoke(resources) {
+  const load = createRequire(resources ? path.join(resources, 'app.asar', 'package.json') : path.join(root, 'apps/electron/package.json'))
+  assert.equal(typeof load('@huggingface/transformers').pipeline, 'function')
+  const ort = createRequire(load.resolve('@huggingface/transformers'))('onnxruntime-node')
+  // A float32[1] Identity graph (ONNX IR 8, opset 13). No model download is needed.
+  const model = Buffer.from('08083a420a100a017812017922084964656e74697479120c6e61746976652d736d6f6b655a0f0a0178120a0a08080112040a020801620f0a0179120a0a08080112040a0208014202100d', 'hex')
+  const session = await ort.InferenceSession.create(model, { executionProviders: ['cpu'], intraOpNumThreads: 1, interOpNumThreads: 1 })
   try {
+    const result = await session.run({ x: new ort.Tensor('float32', Float32Array.from([42]), [1]) })
+    assert.deepEqual(Array.from(result.y.data), [42])
+  } finally { await session.release() }
+}
+
+if (require.main === module) {
+  void (async () => {
     if (process.argv[2] === '--search-runtime') {
-      const resources = process.argv[3]
-      const load = createRequire(resources ? path.join(resources, 'app.asar', 'package.json') : path.join(root, 'apps/electron/package.json'))
-      assert.equal(typeof load('@huggingface/transformers').pipeline, 'function')
+      await searchRuntimeSmoke(process.argv[3])
     }
     else if (process.argv[2] === '--packaged') { packagedSmoke() }
     else { smoke(process.argv[2] === '--resources' ? process.argv[3] : undefined) }
-  } catch (error) { console.error(error.message); process.exitCode = 1 }
+  })().catch(error => { console.error(error.message); process.exitCode = 1 })
 }

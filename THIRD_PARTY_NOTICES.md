@@ -438,7 +438,7 @@ Transformers.js 4.3.1: https://github.com/huggingface/transformers.js (Apache-2.
 Model conversion: https://huggingface.co/Xenova/all-MiniLM-L6-v2 at revision 751bff37182d3f1213fa05d7196b954e230abad9.
 Original model: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2 (Apache-2.0). Model files download only after the user enables local meaning search. The Apache-2.0 license is reproduced above.
 
-ONNX Runtime 1.30.0 (MIT) is used by the isolated semantic-search worker; the Microsoft MIT notice reproduced under ONNX Runtime above also applies. Source: https://github.com/microsoft/onnxruntime/tree/v1.30.0.
+ONNX Runtime 1.23.2 (MIT) is used by the isolated semantic-search worker; the Microsoft MIT notice reproduced under ONNX Runtime above also applies. Source: https://github.com/microsoft/onnxruntime/tree/v1.23.2. This CPU runtime is pinned to retain native Intel Mac support.
 
 ## ICAL.js 2.2.1
 
