@@ -13,6 +13,7 @@ import { GlobalReferenceContext } from '../components/ReferenceContextEditor'
 import { SETTINGS_TABS, searchSettings, type SettingsTab } from '../settings/catalog'
 import { SemanticSearchSettings } from '../components/SemanticSearchSettings'
 import { CalendarSettings } from '../components/CalendarSettings'
+import { BrandMark } from '../components/BrandMark'
 
 const tabIcons = { general: UserRound, ai: AudioLines, voices: Mic2, calendars: CalendarDays, device: FolderOpen, agents: Plug, about: Info }
 export function SettingsPage(): JSX.Element {
@@ -63,7 +64,7 @@ export function SettingsPage(): JSX.Element {
     <div hidden={!!query.trim() || tab !== 'agents'} role="tabpanel" id="settings-panel-agents" aria-labelledby="settings-tab-agents"><AgentConnectionsPanel /></div>
     <div hidden={!!query.trim() || tab !== 'about'} role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about">
       <UpdatesSettingsPanel />
-      <section className="settings-section" id="about" tabIndex={-1}><h2>About {product.name}</h2><div className="version-line"><span>Version {version?.version ?? product.version}</span><span>Electron {version?.electron ?? '—'}</span><span>{version?.platform === 'win32' ? 'Windows' : version?.platform === 'darwin' ? 'macOS' : version?.platform ?? ''}</span></div><details className="settings-details"><summary>Licenses &amp; credits</summary><p>MIT licensed. Jensen protocol and device services adapted from sgeraldes/hidock-next-2 at commit 31d44da. Copyright © 2025 Sebastian Geraldes. Full notices are included with the source and installer.</p></details></section>
+      <section className="settings-section" id="about" tabIndex={-1}><div className="about-app"><BrandMark size={72} /><div><h2>About {product.name}</h2><div className="version-line"><span>Version {version?.version ?? product.version}</span><span>Electron {version?.electron ?? '—'}</span><span>{version?.platform === 'win32' ? 'Windows' : version?.platform === 'darwin' ? 'macOS' : version?.platform ?? ''}</span></div></div></div><details className="settings-details"><summary>Licenses &amp; credits</summary><p>MIT licensed. Jensen protocol and device services adapted from sgeraldes/hidock-next-2 at commit 31d44da. Copyright © 2025 Sebastian Geraldes. Full notices are included with the source and installer.</p></details></section>
     </div>
   </div>
 }

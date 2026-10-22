@@ -64,9 +64,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## App icon
+## Interface icons
 
-The app and installer icons use the AudioLines geometry from lucide-react 0.460.0, also used in the application titlebar.
+Interface icons use lucide-react 0.460.0. The app and installer artwork is original generated artwork; its source and generation details are in `apps/electron/resources/branding/README.md`.
 
 ISC License
 

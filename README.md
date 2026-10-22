@@ -1,3 +1,5 @@
+<img src="apps/electron/src/assets/brand-mark.png" width="96" height="96" alt="HiDockNotes icon" />
+
 # HiDockNotes
 
 Turn HiDock recordings and imported audio into searchable transcripts, meeting notes, and action items.

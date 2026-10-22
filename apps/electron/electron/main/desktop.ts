@@ -93,12 +93,13 @@ async function createWindow(): Promise<void> {
   configureSettingsReader(readSettings)
   await initializeFileStorage()
   Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null)
+  const icon = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(__dirname, '../../resources/icon.png')
   window = new BrowserWindow({
     width: 1340, height: 900, minWidth: 980, minHeight: 650, show: false,
-    title: product.name, frame: false, backgroundColor: '#fafbfc', icon: app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(__dirname, '../../resources/icon.png'),
+    title: product.name, frame: false, backgroundColor: '#fafbfc', icon,
     webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   })
-  if (process.platform === 'darwin') app.dock?.setIcon(app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(__dirname, '../../resources/icon.png'))
+  if (process.platform === 'darwin') app.dock?.setIcon(icon)
   setIpcOwner(window)
   registerAppHandlers(window)
   libraryBackup = registerBackupHandlers(window)

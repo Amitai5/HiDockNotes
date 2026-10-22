@@ -109,5 +109,5 @@ export function registerAppHandlers(window: BrowserWindow): void {
   })
   handle('activity-log:list', getActivityLog)
   handle('activity-log:clear', clearActivityLog)
-  app.setAboutPanelOptions({ applicationName: product.name, applicationVersion: product.version, copyright: 'MIT · Adapted device protocol © 2025 Sebastian Geraldes' })
+  app.setAboutPanelOptions({ applicationName: product.name, applicationVersion: product.version, iconPath: app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(__dirname, '../../resources/icon.png'), copyright: 'MIT · Adapted device protocol © 2025 Sebastian Geraldes' })
 }
