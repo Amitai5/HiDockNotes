@@ -6,6 +6,7 @@ import { getDetail } from '../services/database'
 import { transcriptContent } from './providers'
 import type { ProcessingResult, TranscriptCheckpoint } from './backend'
 import { rememberTranscript, transcriptVersion } from '../services/transcript-revisions'
+import { legacyMeetingOutcomes } from '../../../src/shared/meeting-outcomes'
 
 export function saveTranscript(id: string, checkpoint: TranscriptCheckpoint, settings: AISettings): void {
   runInTransaction(() => {
@@ -38,7 +39,8 @@ export function saveProcessingResult(id: string, result: ProcessingResult, setti
       run('INSERT INTO recording_overviews(recording_id,summary_version) VALUES (?,?) ON CONFLICT(recording_id) DO UPDATE SET summary_version=excluded.summary_version', [id, transcriptVersion(id)])
       const recording = queryOne<Recording & { title_source: string | null }>('SELECT * FROM recordings WHERE id=?', [id])
       if (recording && (!recording.title || recording.title_source === 'ai')) run("UPDATE recordings SET title=?, title_source='ai' WHERE id=?", [result.summary.title, id])
-      run('INSERT INTO summaries(id, recording_id, text, template) VALUES (?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET text=excluded.text, template=excluded.template', [randomUUID(), id, result.summary.summary, settings.summaryTemplate])
+      const outcomes = result.summary.outcomes ?? legacyMeetingOutcomes(result.summary.summary)
+      run('INSERT INTO summaries(id, recording_id, text, template, outcomes) VALUES (?, ?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET text=excluded.text, template=excluded.template, outcomes=excluded.outcomes', [randomUUID(), id, result.summary.summary, settings.summaryTemplate, JSON.stringify(outcomes)])
       if (result.summary.meetingType && result.summary.participants) run('INSERT INTO recording_overviews(recording_id,meeting_type,participants) VALUES (?,?,?) ON CONFLICT(recording_id) DO UPDATE SET meeting_type=excluded.meeting_type,participants=excluded.participants', [id, result.summary.meetingType, JSON.stringify(result.summary.participants)])
       if (result.summary.tags) {
         run("DELETE FROM recording_tags WHERE recording_id=? AND source='ai'", [id])

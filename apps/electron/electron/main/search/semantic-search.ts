@@ -4,7 +4,7 @@ import type { RecordingView } from '../../../src/shared/contracts'
 import { EMPTY_SEMANTIC_STATE, type SearchMode, type SemanticSearchState } from '../../../src/shared/semantic-search'
 import { listRecordings, queryAll, queryOne, run } from '../services/database'
 import { downloadSearchModel, hasSearchModel, searchModelDirectory, SEARCH_MODEL_ID } from './semantic-model'
-import { saveSearchDocument, searchDocument, semanticCitations, semanticHits, type EmbeddingRunner } from './semantic-index'
+import { saveSearchDocument, searchDocument, semanticCitations, semanticHits, type EmbeddingRunner, type MeaningMatches } from './semantic-index'
 
 interface Dependencies { dataPath: string; runner: EmbeddingRunner; changed(state: SemanticSearchState): void; now?: () => Date; request?: typeof fetch; modelAvailable?: () => Promise<boolean>; download?: (progress: (value: number) => void, signal: AbortSignal) => Promise<void> }
 /** Optional local indexing. Starting the app or restoring a backup never downloads the model. */
@@ -74,6 +74,24 @@ export class SemanticSearch {
       signal?.throwIfAborted()
       this.publish({ phase: 'failed', error: 'Meaning search could not run. Assistant is using keyword search; retry local search setup in Settings.' })
       return []
+    }
+  }
+  /** Agent reads never enable search, download a model, or change background processing. */
+  async agentMatches(query: string, projectId: string | null | undefined, signal?: AbortSignal): Promise<MeaningMatches> {
+    signal?.throwIfAborted()
+    const unavailable = (reason: string): MeaningMatches => ({ hits: [], fallbackReason: reason, indexing: false, truncated: false })
+    if (!this.view.enabled || !this.view.modelReady) return unavailable('Enable and download local meaning search in Settings to search by meaning. Keyword results are shown.')
+    if (this.view.phase === 'failed') return unavailable('Local meaning search is unavailable. Retry search setup in Settings. Keyword results are shown.')
+    try {
+      const [vector] = await this.dependencies.runner.embed([query], signal)
+      signal?.throwIfAborted()
+      if (!this.view.enabled) return unavailable('Local meaning search was disabled. Keyword results are shown.')
+      const hits = await semanticHits(vector, projectId ?? null, false, { unfiledOnly: projectId === null, limit: 1001, signal })
+      const state = this.state()
+      return { hits: hits.slice(0, 1000), fallbackReason: null, indexing: state.phase === 'indexing' || state.phase === 'waiting' || state.indexedRecordings < state.totalRecordings, truncated: hits.length > 1000 }
+    } catch {
+      signal?.throwIfAborted()
+      return unavailable('Local meaning search could not run. Keyword results are shown; retry search setup in Settings.')
     }
   }
   async stop(): Promise<void> { clearTimeout(this.timer); this.controller?.abort(); await this.task?.catch(() => undefined); await this.dependencies.runner.stop() }

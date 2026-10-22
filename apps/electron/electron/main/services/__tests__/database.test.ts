@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { closeDatabase, initializeDatabase, getDatabase, queryOne, run, upsertRecordingFromDevice, listRecordings, getSettings, saveSettings, createProject, renameRecording } from '../database'
+import { closeDatabase, initializeDatabase, getDatabase, queryOne, run, upsertRecordingFromDevice, listRecordings, getSettings, saveSettings, createProject, renameRecording, DATABASE_SCHEMA_VERSION } from '../database'
 
 describe('recording database', () => {
   beforeEach(() => initializeDatabase(':memory:'))
   afterEach(closeDatabase)
   it('applies versioned migrations and enables foreign keys', () => {
-    expect(getDatabase().pragma('user_version', { simple: true })).toBe(12)
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(DATABASE_SCHEMA_VERSION)
     expect(getDatabase().pragma('foreign_keys', { simple: true })).toBe(1)
     expect(queryOne('SELECT name FROM sqlite_master WHERE name=?', ['voice_samples'])).toBeDefined()
   })

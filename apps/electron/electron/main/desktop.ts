@@ -49,6 +49,7 @@ import { CalendarService } from './calendar/calendar-service'
 import { parseCalendarInWorker } from './calendar/calendar-worker-runner'
 import { registerCalendarHandlers } from './ipc/calendar-handlers'
 import type { AssistantConversations } from './services/assistant-conversations'
+import { readReferenceContext } from './services/reference-context'
 
 app.setName(product.name)
 app.setAppUserModelId(product.appId)
@@ -109,12 +110,13 @@ async function createWindow(): Promise<void> {
   recordingEvents.on('changed', () => semanticSearch?.scheduleIndex())
   calendars = new CalendarService({ encryption, parse: parseCalendarInWorker, changed: () => { if (window && !window.isDestroyed()) window.webContents.send('calendar:changed') }, libraryChanged })
   registerCalendarHandlers(calendars, () => shell.openExternal('https://calendar.google.com/calendar/u/0/r/settings'))
-  const agentTools = new LibraryAgentTools({ all: queryAll, one: queryOne })
+  const search = semanticSearch
+  const agentTools = new LibraryAgentTools({ all: queryAll, one: queryOne }, { referenceContext: readReferenceContext, meaningSearch: (query, projectId, signal) => search.agentMatches(query, projectId, signal) })
   agentAccess = new AgentAccessController({
     readEnabled: () => queryOne<{ value: string }>("SELECT value FROM settings WHERE key='agent-mcp-enabled'")?.value === 'true',
     saveEnabled: value => { run("INSERT OR REPLACE INTO settings(key,value) VALUES ('agent-mcp-enabled',?)", [JSON.stringify(value)]) },
     store: new AgentConnectionStore(connectionFile(join(app.getPath('userData'), 'data', 'agent-connection.bin')), encryption),
-    call: (name, value) => agentTools.call(name, value),
+    call: (name, value, signal) => agentTools.call(name, value, signal),
     setup: agentSetup(process.execPath, app.getPath('userData'), process.platform, app.isPackaged ? join(process.resourcesPath, 'mcp-launcher.cjs') : join(__dirname, 'mcp-launcher.js'), app.isPackaged ? undefined : app.getAppPath())
   })
   registerAgentHandlers(agentAccess)

@@ -7,7 +7,7 @@ interface AgentAccessOptions {
   readEnabled(): boolean
   saveEnabled(value: boolean): void
   store: AgentConnectionStore
-  call(name: string, argumentsValue: unknown): unknown
+  call(name: string, argumentsValue: unknown, signal: AbortSignal): unknown
   setup: Record<AgentSetupTarget, string>
 }
 export class AgentAccessController {

@@ -5,7 +5,8 @@ import { SEARCH_MODEL_ID } from './semantic-model'
 
 export interface SearchChunk { text: string; start: number; end: number; kind: 'transcript' | 'summary' }
 export interface SearchDocument { id: string; fingerprint: string; chunks: SearchChunk[] }
-export interface SemanticHit { recordingId: string; title: string; text: string; start: number; end: number; kind: SearchChunk['kind']; score: number }
+export interface SemanticHit { recordingId: string; title: string; text: string; start: number; end: number; kind: SearchChunk['kind']; score: number; fingerprint?: string }
+export interface MeaningMatches { hits: SemanticHit[]; fallbackReason: string | null; indexing: boolean; truncated: boolean }
 export interface EmbeddingRunner { embed(texts: string[], signal?: AbortSignal): Promise<number[][]>; stop(): Promise<void> }
 interface Segment { start: number; end: number; text: string; label: string | null }
 
@@ -51,24 +52,26 @@ export function saveSearchDocument(document: SearchDocument, vectors: number[][]
     return true
   })
 }
-export async function semanticHits(vector: number[], projectId: string | null = null, transcriptsOnly = false): Promise<SemanticHit[]> {
+export async function semanticHits(vector: number[], projectId: string | null = null, transcriptsOnly = false, options: { unfiledOnly?: boolean; limit?: number; signal?: AbortSignal } = {}): Promise<SemanticHit[]> {
   const normalized = vectorBytes(vector), query = Array.from({ length: 384 }, (_, index) => normalized.readFloatLE(index * 4))
   const best = new Map<string, SemanticHit>()
   let after = 0
   for (;;) {
-    const rows = queryAll<{ id: number; recording_id: string; title: string; text: string; start: number; end: number; kind: SearchChunk['kind']; embedding: Buffer }>(`SELECT c.*,COALESCE(r.title,r.filename) AS title FROM semantic_chunks c JOIN recordings r ON r.id=c.recording_id JOIN semantic_documents d ON d.recording_id=r.id WHERE c.id>? AND r.verified=1 AND d.model=? AND (? IS NULL OR r.project_id=?)${transcriptsOnly ? " AND c.kind='transcript'" : ''} ORDER BY c.id LIMIT 512`, [after, SEARCH_MODEL_ID, projectId, projectId])
+    options.signal?.throwIfAborted()
+    const rows = queryAll<{ id: number; recording_id: string; title: string; text: string; start: number; end: number; kind: SearchChunk['kind']; embedding: Buffer; fingerprint: string }>(`SELECT c.*,d.fingerprint,COALESCE(r.title,r.filename) AS title FROM semantic_chunks c JOIN recordings r ON r.id=c.recording_id JOIN semantic_documents d ON d.recording_id=r.id WHERE c.id>? AND r.verified=1 AND d.model=? AND (? IS NULL OR r.project_id=?)${options.unfiledOnly ? ' AND r.project_id IS NULL' : ''}${transcriptsOnly ? " AND c.kind='transcript'" : ''} ORDER BY c.id LIMIT 512`, [after, SEARCH_MODEL_ID, projectId, projectId])
     for (const row of rows) {
       if (row.embedding.length !== 384 * 4) continue
       let score = 0
       for (let index = 0; index < 384; index++) score += query[index] * row.embedding.readFloatLE(index * 4)
       if (score < 0.25 || score <= (best.get(row.recording_id)?.score ?? -1)) continue
-      best.set(row.recording_id, { recordingId: row.recording_id, title: row.title, text: row.text, start: row.start, end: row.end, kind: row.kind, score })
+      best.set(row.recording_id, { recordingId: row.recording_id, title: row.title, text: row.text, start: row.start, end: row.end, kind: row.kind, score, fingerprint: row.fingerprint })
     }
     if (rows.length < 512) break
     after = rows[rows.length - 1].id
     await new Promise<void>(resolve => setImmediate(resolve))
   }
-  return [...best.values()].sort((a, b) => b.score - a.score).slice(0, 30)
+  const current = new Map(queryAll<{ recording_id: string; fingerprint: string }>('SELECT recording_id,fingerprint FROM semantic_documents WHERE model=?', [SEARCH_MODEL_ID]).map(row => [row.recording_id, row.fingerprint]))
+  return [...best.values()].filter(hit => current.get(hit.recordingId) === hit.fingerprint).sort((a, b) => b.score - a.score || a.recordingId.localeCompare(b.recordingId)).slice(0, options.limit ?? 30)
 }
 /** Citations always reread the current transcript instead of treating cached model text as evidence. */
 export function semanticCitations(hits: SemanticHit[]): RecordingCitation[] {

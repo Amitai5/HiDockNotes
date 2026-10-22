@@ -6,6 +6,7 @@ import { readAudioDuration } from './audio-duration'
 import type { ActionableView, AppSettings, ProjectView, RecordingDetail, RecordingView } from '../../../src/shared/contracts'
 import type { LibraryNavigation } from '../../../src/shared/library'
 import type { MeetingOverview } from '../../../src/shared/meeting'
+import { legacyMeetingOutcomes } from '../../../src/shared/meeting-outcomes'
 
 export interface Recording { id: string; filename: string; file_path: string | null; file_size: number; date_recorded: string; duration_seconds: number | null; checksum: string | null; verified: number; status: RecordingView['status']; title: string | null; project_id: string | null }
 let connection: Database.Database | undefined
@@ -93,7 +94,8 @@ const migrations = [
    CREATE TRIGGER semantic_summary_updated AFTER UPDATE OF text ON summaries BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;
    CREATE TRIGGER semantic_summary_inserted AFTER INSERT ON summaries BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;
    CREATE TRIGGER semantic_summary_deleted AFTER DELETE ON summaries BEGIN DELETE FROM semantic_documents WHERE recording_id=old.recording_id; END;
-   CREATE TRIGGER semantic_speaker_updated AFTER UPDATE OF label ON speakers BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;`
+   CREATE TRIGGER semantic_speaker_updated AFTER UPDATE OF label ON speakers BEGIN DELETE FROM semantic_documents WHERE recording_id=new.recording_id; END;`,
+  `ALTER TABLE summaries ADD COLUMN outcomes TEXT CHECK(outcomes IS NULL OR (json_valid(outcomes) AND json_type(outcomes)='array'));`
 ]
 
 export const DATABASE_SCHEMA_VERSION = migrations.length
@@ -126,7 +128,16 @@ export function initializeDatabase(filePath: string): void {
   const version = Number(connection.pragma('user_version', { simple: true }))
   if (version > migrations.length) throw new Error('This database was created by a newer app version.')
   for (let index = version; index < migrations.length; index++) {
-    connection.transaction(() => { getDatabase().exec(migrations[index]); getDatabase().pragma(`user_version = ${index + 1}`) })()
+    connection.transaction(() => {
+      getDatabase().exec(migrations[index])
+      if (index === 12) {
+        // Preserve legacy outcome sections as summary-derived data. Updating only
+        // metadata leaves notes, transcript revisions and semantic caches intact.
+        const update = getDatabase().prepare('UPDATE summaries SET outcomes=? WHERE recording_id=?')
+        for (const summary of queryAll<{ recording_id: string; text: string }>('SELECT recording_id,text FROM summaries')) update.run(JSON.stringify(legacyMeetingOutcomes(summary.text)), summary.recording_id)
+      }
+      getDatabase().pragma(`user_version = ${index + 1}`)
+    })()
   }
 }
 export function getDatabase(): Database.Database { if (!connection) throw new Error('Database is not initialized.'); return connection }

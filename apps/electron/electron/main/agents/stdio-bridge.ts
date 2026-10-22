@@ -27,7 +27,7 @@ export async function startAgentBridge(): Promise<void> {
   const server = await serveAgentMcp(async (name, argumentsValue, signal) => {
     // Re-read the encrypted connection for every call so disabling access takes effect immediately.
     const connection = await store.read()
-    const response = await fetch(`http://127.0.0.1:${connection.port}/tools`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + connection.token }, body: JSON.stringify({ name, arguments: argumentsValue }), redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) })
+    const response = await fetch(`http://127.0.0.1:${connection.port}/tools`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + connection.token }, body: JSON.stringify({ name, arguments: argumentsValue }), redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(name === 'search_recordings' ? 120000 : 15000)]) })
     if (!response.ok) throw new Error('The local app could not read this tool.')
     const value = await response.json() as { result: unknown }
     return value.result

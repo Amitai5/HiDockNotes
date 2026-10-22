@@ -20,7 +20,7 @@ describe('local agent gateway', () => {
     expect(invalidHost).toBe(403)
     const result = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ name: 'list_recordings', arguments: {} }) })
     expect(await result.json()).toEqual({ result: { recordings: [] } })
-    expect(call).toHaveBeenCalledExactlyOnceWith('list_recordings', {})
+    expect(call).toHaveBeenCalledExactlyOnceWith('list_recordings', {}, expect.any(AbortSignal))
     await gateway.close()
     await expect(fetch(url, { method: 'POST', headers, body: '{}' })).rejects.toThrow()
   })
@@ -35,5 +35,29 @@ describe('local agent gateway', () => {
     expect((await fetch(url, { method: 'POST', headers, body: '{' })).status).toBe(400)
     expect((await fetch(url, { method: 'POST', headers, body: 'x'.repeat(17000) })).status).toBe(413)
     expect(call).not.toHaveBeenCalled()
+  })
+  it('awaits asynchronous meaning search and sanitizes failures', async () => {
+    const call = vi.fn().mockResolvedValueOnce({ recordings: [{ id: 'meaning-match' }], mode: 'meaning' }).mockRejectedValueOnce(new Error('private model path'))
+    gateway = new AgentGateway(call)
+    const { port, token } = await gateway.start()
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body = JSON.stringify({ name: 'search_recordings', arguments: { query: 'borrowing costs', mode: 'meaning' } })
+    const result = await fetch(`http://127.0.0.1:${port}/tools`, { method: 'POST', headers, body })
+    expect(await result.json()).toMatchObject({ result: { recordings: [{ id: 'meaning-match' }], mode: 'meaning' } })
+    const failure = await fetch(`http://127.0.0.1:${port}/tools`, { method: 'POST', headers, body })
+    expect(failure.status).toBe(400)
+    expect(await failure.text()).not.toContain('private model path')
+  })
+  it('cancels in-flight inference when access is disabled', async () => {
+    let signal: AbortSignal | undefined
+    gateway = new AgentGateway((_name, _value, pendingSignal) => new Promise((_resolve, reject) => {
+      signal = pendingSignal
+      pendingSignal.addEventListener('abort', () => reject(new Error('Cancelled')), { once: true })
+    }))
+    const { port, token } = await gateway.start()
+    const pending = fetch(`http://127.0.0.1:${port}/tools`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ name: 'search_recordings', arguments: { query: 'costs', mode: 'meaning' } }) }).catch(() => null)
+    await vi.waitFor(() => expect(signal).toBeDefined())
+    await gateway.close()
+    expect(await pending).toBeNull()
+    expect(signal?.aborted).toBe(true)
   })
 })

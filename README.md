@@ -22,7 +22,7 @@ HiDockNotes is a desktop app for Windows, macOS, and Linux. Your recording libra
 | Calendar-linked meetings | Connect a Google Calendar private iCal feed and link matching events, agendas, and invitees to recordings. |
 | Transcript corrections | Edit text, restore earlier versions, and compare a new transcription before replacing corrected work. |
 | Export and recovery | Export notes, subtitles, and playable audio; back up and restore the complete library. |
-| MCP access | Let an MCP-compatible agent read projects, recordings, notes, and action items through a local, read-only connection. |
+| MCP access | Let an MCP-compatible agent search recordings by meaning and read notes, meeting outcomes, tasks, and saved reference context through a local, read-only connection. |
 
 ## Install
 
@@ -69,6 +69,8 @@ Cloud transcription is optional: choose Gemini or OpenAI under **Transcription**
 ### Read meeting notes and manage tasks
 
 The recording overview shows its title, date, project, meeting type, participants, and tags. Generated notes start with a purpose-and-outcome summary, followed by key discussion points, decisions, open questions, risks/blockers, and next steps.
+
+New summaries also save structured meeting outcomes: decisions, unresolved questions and expected answerers, risks/blockers, and agreed next steps. Supported outcomes include a transcript quote and source timestamp; unknown answerers remain unassigned. These sections appear in the summary and are available through MCP. Existing summaries retain their original text and provide summary-derived outcomes; choose **Resummarize** to add transcript-linked outcomes. Complete backups include the outcome metadata.
 
 Names and organizer status require evidence in the transcript or speaker labels. Unidentified people use **Unknown speaker N**. Generated tags cover the topics, project/client when mentioned, and meeting type. AI output can be wrong; use the linked transcript and audio to check important details.
 
@@ -168,7 +170,17 @@ Deletion removes that recording's audio, transcript, summary, action items, tags
 3. Choose **Copy configuration** and add the generated JSON server entry to your client's MCP settings. Clients with separate fields can use its command, arguments, and environment values. The app supplies the required executable and launcher paths.
 4. Ask the agent to find recordings, read notes, or list action items. Disable MCP access to revoke reads.
 
-Available tools: `list_projects`, `list_recordings`, `search_recordings`, `get_recording`, and `list_action_items`.
+| Tool | Use |
+| --- | --- |
+| `list_projects` | Project folders and recording counts. |
+| `list_recordings` | Recordings, with project/status filters and pagination. |
+| `search_recordings` | Keyword search by default; `mode: "meaning"` combines the optional local model with keyword search. Returns matching passages and available timestamps. |
+| `get_recording` | Summary, timestamped transcript, and action items. |
+| `list_action_items` | Open or completed tasks with deadlines and source timestamps. |
+| `get_reference_context` | Global background and, optionally, one project's people, terminology, and background. Reference information is distinct from meeting evidence. |
+| `list_meeting_outcomes` | Decisions, open questions, risks/blockers, and next steps, filtered by project, recording, outcome kind, or recording date. |
+
+Meaning search uses the model enabled in **Settings → AI**; MCP reads never download it automatically. If it is unavailable, results explicitly report keyword fallback. Outcome kinds are `decision`, `open_question`, `risk`, and `next_step`; date filters use inclusive UTC recording dates (`from`/`to`, `YYYY-MM-DD`). Results identify transcript-backed versus older summary-derived entries and flag summaries made stale by transcript edits. See [MCP tool examples](docs/mcp-tools.md).
 
 The bundled stdio launcher needs no separate Node installation or Codex/Claude terminal command. Access is read-only: it excludes audio, voice embeddings, credentials, arbitrary filesystem access, and device operations. If the installation path changes, copy the configuration again.
 

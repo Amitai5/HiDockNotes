@@ -27,4 +27,14 @@ describe('saving regenerated meeting notes', () => {
     saveProcessingResult(id, { ...checkpoint, transcriptChanged: false, empty: false, summary }, DEFAULT_AI_SETTINGS)
     expect(getDetail(id).tags).toEqual(['Planning', 'operations', 'meeting'])
   })
+  it('persists structured outcomes with their notes and replaces them when notes are regenerated', () => {
+    const id = upsertRecordingFromDevice({ filename: 'outcomes.hda', size: 10, duration: 10, dateCreated: new Date('2026-10-07T10:00:00Z') }).id
+    const checkpoint = { duration: 10, speakers: [], segments: [{ id: 'segment', start: 1, end: 2, text: 'We approved the pilot.', speakerId: null, speakerName: null }] }
+    const outcomes = [{ kind: 'decision' as const, text: 'The pilot was approved.', answerer: null, start: 1, evidence: 'We approved the pilot.', source: 'transcript' as const }]
+    const summary = { title: 'Pilot', summary: '## Decisions\nThe pilot was approved.', actionItems: [], outcomes }
+    saveProcessingResult(id, { ...checkpoint, empty: false, summary }, DEFAULT_AI_SETTINGS)
+    expect(JSON.parse(queryOne<{ outcomes: string }>('SELECT outcomes FROM summaries WHERE recording_id=?', [id])!.outcomes)).toEqual(outcomes)
+    saveProcessingResult(id, { ...checkpoint, transcriptChanged: false, empty: false, summary: { ...summary, outcomes: [], summary: '## Decisions\nNone recorded.' } }, DEFAULT_AI_SETTINGS)
+    expect(queryOne('SELECT outcomes FROM summaries WHERE recording_id=?', [id])).toEqual({ outcomes: '[]' })
+  })
 })

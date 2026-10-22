@@ -27,7 +27,7 @@ describe('read-only MCP protocol', () => {
     const call = vi.fn().mockResolvedValueOnce({ recordings: [] }).mockRejectedValueOnce(new Error('private token must never be exposed')), server = new ReadOnlyMcpServer(call)
     await initialize(server)
     const request = { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_recordings', arguments: {} } }
-    expect(await server.receive(request)).toMatchObject({ id: 2, result: { content: [{ type: 'text', text: '{"recordings":[]}' }] } })
+    expect(await server.receive(request)).toMatchObject({ id: 2, result: { content: [{ type: 'text', text: '{"recordings":[]}' }], structuredContent: { recordings: [] } } })
     const failure = await server.receive({ ...request, id: 3 })
     expect(failure).toMatchObject({ result: { isError: true } })
     expect(JSON.stringify(failure)).not.toContain('private token')

@@ -7,8 +7,9 @@ export class AgentGateway {
   private server: Server | undefined
   private accepting = false
   private active = 0
+  private readonly pending = new Set<AbortController>()
   private connection: LocalAgentConnection | undefined
-  constructor(private readonly call: (name: string, value: unknown) => unknown) {}
+  constructor(private readonly call: (name: string, value: unknown, signal: AbortSignal) => unknown) {}
   async start(): Promise<LocalAgentConnection> {
     if (this.server) throw new Error('Agent access is already running.')
     const token = randomBytes(32).toString('base64url')
@@ -31,6 +32,7 @@ export class AgentGateway {
   }
   async close(): Promise<void> {
     this.accepting = false
+    for (const controller of this.pending) controller.abort()
     const server = this.server
     this.server = undefined
     this.connection = undefined
@@ -50,6 +52,10 @@ export class AgentGateway {
     if (!request.headers['content-type']?.startsWith('application/json')) { reply(415, { error: 'Use JSON tool arguments.' }); return }
     if (this.active >= 8) { reply(429, { error: 'Too many agent requests. Try again.' }); return }
     this.active++
+    const controller = new AbortController()
+    this.pending.add(controller)
+    const cancelled = (): void => controller.abort()
+    response.once('close', cancelled)
     try {
       const chunks: Buffer[] = []
       let size = 0
@@ -64,9 +70,13 @@ export class AgentGateway {
       if (!input || typeof input !== 'object' || Array.isArray(input) || typeof (input as { name?: unknown }).name !== 'string' || Object.keys(input).some(key => !['name', 'arguments'].includes(key))) { reply(400, { error: 'Invalid tool request.' }); return }
       if (!this.accepting) { reply(403, { error: 'Agent access is off.' }); return }
       const value = input as { name: string; arguments?: unknown }
-      try { reply(200, { result: this.call(value.name, value.arguments) }) }
+      try {
+        const result = await this.call(value.name, value.arguments, controller.signal)
+        if (!this.accepting || this.connection?.token !== token) reply(403, { error: 'Agent access is off.' })
+        else if (!controller.signal.aborted) reply(200, { result })
+      }
       catch { reply(400, { error: 'The tool or its arguments are invalid, or the recording is unavailable.' }) }
     } catch { reply(400, { error: 'The agent request could not be read.' }) }
-    finally { this.active-- }
+    finally { response.removeListener('close', cancelled); this.pending.delete(controller); this.active-- }
   }
 }

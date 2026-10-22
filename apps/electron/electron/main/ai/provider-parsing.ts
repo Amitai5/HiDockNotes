@@ -3,6 +3,7 @@ import type { SummaryResult, TimedText, TranscriptionResult } from './providers'
 import { isDateOnly } from '../../../src/shared/actionables'
 import type { TranscriptSegment } from '../../../src/shared/contracts'
 import { groundedName, parseMeetingParticipants, renderSummaryActions } from './summary-metadata'
+import { parseSummaryOutcomes, renderSummaryOutcomes } from './summary-outcomes'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function timed(start: unknown, end: unknown, text: unknown, duration: number): TimedText | null {
@@ -57,6 +58,11 @@ export function parseSummary(text: string, duration: number, evidence?: Transcri
     return { text: action.text.trim(), start: action.start as number | null, ...(action.owner === undefined ? {} : { owner }), ...(action.dueDate === undefined ? {} : { dueDate: action.dueDate as string | null }) }
   })
   const summary: SummaryResult = { title: item.title.trim().slice(0, 200), summary: item.summary.trim(), actionItems }
+  if (item.outcomes !== undefined) {
+    if (!Array.isArray(item.outcomes) || item.outcomes.length > 80) throw new ProcessingError('The summary contained invalid meeting outcomes. Retry to generate it again.', true)
+    summary.outcomes = parseSummaryOutcomes(item.outcomes, evidence ?? [])
+    summary.summary = renderSummaryOutcomes(summary.summary, summary.outcomes)
+  }
   if (evidence || item.meetingType !== undefined) {
     if (typeof item.meetingType !== 'string' || !item.meetingType.trim() || item.meetingType.length > 100 || !Array.isArray(item.tags) || item.tags.length < 3 || item.tags.length > 7 || item.tags.some(tag => typeof tag !== 'string' || !tag.trim() || tag.trim().length > 40 || /[\u0000-\u001f]/.test(tag))) throw new ProcessingError('The summary did not include a valid meeting type and 3–7 tags.', true)
     summary.meetingType = item.meetingType.trim()

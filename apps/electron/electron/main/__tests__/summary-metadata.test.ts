@@ -17,6 +17,8 @@ describe('grounded meeting summaries', () => {
       for (const section of ['2–4 paragraphs', 'Key discussion points', 'Decisions', 'Action items', 'Open questions', 'Risks / blockers', 'Next steps', 'Unassigned', 'No date', 'Never expand a partial name']) expect(prompt).toContain(section)
     }
     expect(SUMMARY_SCHEMA.properties.participants.maxItems).toBe(10)
+    expect(SUMMARY_SCHEMA.required).toContain('outcomes')
+    expect(SUMMARY_SCHEMA.properties.outcomes.maxItems).toBe(80)
     expect(parse().tags).toEqual(['planning', 'operations', 'meeting'])
   })
   it('extracts an explicitly introduced full name and organizer, and fills unknown speaking attendees', () => {

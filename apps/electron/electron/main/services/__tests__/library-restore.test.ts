@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import { closeDatabase, createProject, getDatabase, getDetail, initializeDatabase, queryOne, run, upsertRecordingFromDevice } from '../database'
+import { closeDatabase, createProject, getDatabase, getDetail, initializeDatabase, queryOne, run, upsertRecordingFromDevice, DATABASE_SCHEMA_VERSION } from '../database'
 import { LibraryBackupService } from '../library-backup'
 import { LibraryRestoreService, applyPendingRestore } from '../library-restore'
 import { tarHeader } from '../backup-archive'
@@ -70,7 +70,18 @@ describe('verified, recoverable library restore', () => {
     initializeDatabase(join(data, 'data', 'library.db'))
     expect(readReferenceContext(null)).toEqual(global)
     expect(readReferenceContext(project.id)).toEqual(scoped)
-    expect(getDatabase().pragma('user_version', { simple: true })).toBe(12)
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(DATABASE_SCHEMA_VERSION)
+  })
+  it('round-trips structured meeting outcomes and their original source quotes', async () => {
+    const outcomes = JSON.stringify([{ kind: 'decision', text: 'Keep the corrected wording.', answerer: null, start: 0, evidence: 'Corrected words', source: 'transcript' }])
+    run('INSERT INTO summaries(id,recording_id,text,outcomes) VALUES (?,?,?,?)', ['notes', id, '## Decisions\nKeep the corrected wording.', outcomes])
+    await backups.create(archive)
+    run('DELETE FROM summaries')
+    const preview = await restore.prepare(archive)
+    await restore.schedule(preview!.id); closeDatabase()
+    expect(applyPendingRestore(data)).toBe(true)
+    initializeDatabase(join(data, 'data', 'library.db'))
+    expect(queryOne('SELECT outcomes FROM summaries WHERE recording_id=?', [id])).toEqual({ outcomes })
   })
   it('fails on corrupt or truncated audio and leaves the current database intact', async () => {
     const bytes = gunzipSync(await readFile(archive)), index = bytes.indexOf(audio)
@@ -115,7 +126,7 @@ describe('verified, recoverable library restore', () => {
     await restore.schedule(preview!.id); closeDatabase()
     expect(applyPendingRestore(data)).toBe(true)
     initializeDatabase(join(data, 'data', 'library.db'))
-    expect(getDatabase().pragma('user_version', { simple: true })).toBe(12)
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(DATABASE_SCHEMA_VERSION)
     expect(getDetail(id).segments[0].text).toBe('Corrected words')
     expect(getDetail(id).actionables[0].done).toBe(true)
   })
@@ -148,7 +159,7 @@ describe('verified, recoverable library restore', () => {
     initializeDatabase(join(data, 'data', 'library.db'))
     expect(getDetail(id).segments[0].text).toBe('Corrected words')
     expect(queryOne('SELECT count(*) AS count FROM assistant_conversations')).toEqual({ count: 0 })
-    expect(getDatabase().pragma('user_version', { simple: true })).toBe(12)
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(DATABASE_SCHEMA_VERSION)
   })
   it('rejects an unknown trigger even when the archive and database hashes are otherwise valid', async () => {
     getDatabase().exec("CREATE TRIGGER unexpected_update AFTER UPDATE ON recordings BEGIN DELETE FROM actionables; END")

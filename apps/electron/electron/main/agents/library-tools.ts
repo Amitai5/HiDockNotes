@@ -1,5 +1,9 @@
 import { validateId } from '../ipc/jensen-validation'
 import { AGENT_TOOL_CATALOG, type AgentToolName } from './tool-catalog'
+import { searchAgentRecordings, type AgentMeaningSearch } from './recording-search'
+import type { ReferenceContextDocument } from '../../../src/shared/reference-context'
+import { OUTCOME_KINDS, readMeetingOutcomes } from '../../../src/shared/meeting-outcomes'
+import { isDateOnly } from '../../../src/shared/actionables'
 
 export interface AgentDatabaseReader {
   all<T>(sql: string, parameters?: unknown[]): T[]
@@ -11,6 +15,7 @@ interface ActionRow { id: string; text: string; done: number; recordingId: strin
 const recordingColumns = 'r.id, r.filename, r.title, r.date_recorded AS recordedAt, r.duration_seconds AS durationSeconds, r.status, r.project_id AS projectId'
 const actionColumns = 'a.id, a.text, a.done, a.recording_id AS recordingId, a.start, a.created_at AS createdAt, a.due_date AS dueDate, a.completed_at AS completedAt'
 const statuses = ['device-only', 'downloaded', 'queued', 'converting', 'diarizing', 'transcribing', 'identifying', 'summarizing', 'done', 'failed', 'empty']
+interface AgentServices { meaningSearch?: AgentMeaningSearch; referenceContext?(projectId: string | null): ReferenceContextDocument }
 
 function integer(value: unknown, fallback: number, min: number, max: number): number {
   if (value === undefined) return fallback
@@ -27,8 +32,9 @@ function boundedText(value: string, limit: number): string { return value.slice(
 function actionable(row: ActionRow): Omit<ActionRow, 'done'> & { done: boolean } { return { ...row, text: boundedText(row.text, 2000), done: row.done === 1 } }
 
 export class LibraryAgentTools {
-  constructor(private readonly database: AgentDatabaseReader) {}
-  call(name: string, value: unknown): unknown {
+  constructor(private readonly database: AgentDatabaseReader, private readonly services: AgentServices = {}) {}
+  call(name: string, value: unknown, signal?: AbortSignal): unknown {
+    signal?.throwIfAborted()
     const tool = AGENT_TOOL_CATALOG.find(item => item.name === name)
     if (!tool) throw new Error('Unknown or unavailable tool.')
     if (value !== undefined && (!value || typeof value !== 'object' || Array.isArray(value))) throw new Error('Tool arguments must be an object.')
@@ -36,8 +42,10 @@ export class LibraryAgentTools {
     if (Object.keys(input).some(key => !Object.hasOwn(tool.inputSchema.properties, key))) throw new Error('Unknown tool argument.')
     switch (name as AgentToolName) {
       case 'list_projects': return this.projects(input)
-      case 'list_recordings': return this.recordings(input, false)
-      case 'search_recordings': return this.recordings(input, true)
+      case 'list_recordings': return this.recordings(input)
+      case 'search_recordings': return this.search(input, signal)
+      case 'get_reference_context': return this.referenceContext(input)
+      case 'list_meeting_outcomes': return this.outcomes(input)
       case 'get_recording': return this.recording(input)
       case 'list_action_items': return this.actions(input)
     }
@@ -47,22 +55,48 @@ export class LibraryAgentTools {
     const rows = this.database.all<{ id: string; name: string; count: number }>('SELECT p.id, p.name, count(r.id) AS count FROM projects p LEFT JOIN recordings r ON r.project_id=p.id GROUP BY p.id ORDER BY p.name, p.id LIMIT ? OFFSET ?', [limit + 1, offset])
     return { projects: rows.slice(0, limit), nextOffset: rows.length > limit ? offset + limit : null }
   }
-  private recordings(input: Record<string, unknown>, search: boolean): unknown {
+  private recordings(input: Record<string, unknown>): unknown {
     const { limit, offset } = page(input)
     const parameters: unknown[] = []
     let where = ' WHERE 1=1' + projectClause(input, parameters)
-    if (search) {
-      if (typeof input.query !== 'string' || !input.query.trim() || input.query.length > 500 || /[\u0000-\u001f]/.test(input.query)) throw new Error('Search needs between 1 and 500 characters.')
-      const terms = input.query.trim().split(/\s+/).map(term => '"' + term.replaceAll('"', '""') + '"*').join(' AND ')
-      where += ' AND r.id IN (SELECT recording_id FROM recording_fts WHERE recording_fts MATCH ?)'
-      parameters.push(terms)
-    }
     if (input.status !== undefined) {
       if (typeof input.status !== 'string' || !statuses.includes(input.status)) throw new Error('Unknown recording status.')
       where += ' AND r.status=?'; parameters.push(input.status)
     }
     const rows = this.database.all<RecordingRow & { excerpt: string | null }>(`SELECT ${recordingColumns}, substr(COALESCE(s.text,t.text,''),1,600) AS excerpt FROM recordings r LEFT JOIN summaries s ON s.recording_id=r.id LEFT JOIN transcripts t ON t.recording_id=r.id${where} ORDER BY r.date_recorded DESC, r.id LIMIT ? OFFSET ?`, [...parameters, limit + 1, offset])
     return { recordings: rows.slice(0, limit), nextOffset: rows.length > limit ? offset + limit : null }
+  }
+  private search(input: Record<string, unknown>, signal?: AbortSignal): unknown {
+    const pagination = page(input)
+    if (typeof input.query !== 'string' || !input.query.trim() || input.query.length > 500 || /[\u0000-\u001f]/.test(input.query)) throw new Error('Search needs between 1 and 500 characters.')
+    if (input.mode !== undefined && input.mode !== 'keywords' && input.mode !== 'meaning') throw new Error('Choose keywords or meaning search.')
+    const projectId = input.projectId == null ? input.projectId as null | undefined : validateId(input.projectId)
+    return searchAgentRecordings(this.database, { ...pagination, query: input.query, mode: input.mode === 'meaning' ? 'meaning' : 'keywords', projectId }, this.services.meaningSearch, signal)
+  }
+  private referenceContext(input: Record<string, unknown>): unknown {
+    if (!this.services.referenceContext) throw new Error('Reference context is unavailable.')
+    const projectId = input.projectId == null ? null : validateId(input.projectId)
+    const project = projectId === null ? null : this.database.one<{ id: string; name: string }>('SELECT id,name FROM projects WHERE id=?', [projectId])
+    if (projectId !== null && !project) throw new Error('Project was not found.')
+    return { source: 'user_reference', isMeetingEvidence: false, global: this.services.referenceContext(null), project: project ? { ...project, ...this.services.referenceContext(project.id) } : null }
+  }
+  private outcomes(input: Record<string, unknown>): unknown {
+    const { limit, offset } = page(input)
+    const parameters: unknown[] = []
+    let where = ' WHERE o.type=\'object\'' + projectClause(input, parameters)
+    if (input.recordingId !== undefined) { where += ' AND r.id=?'; parameters.push(validateId(input.recordingId)) }
+    if (input.kind !== undefined) {
+      if (!OUTCOME_KINDS.includes(input.kind as typeof OUTCOME_KINDS[number])) throw new Error('Unknown outcome kind.')
+      where += " AND json_extract(o.value,'$.kind')=?"; parameters.push(input.kind)
+    }
+    for (const field of ['from', 'to'] as const) {
+      if (input[field] === undefined) continue
+      if (!isDateOnly(input[field])) throw new Error('Use valid YYYY-MM-DD recording dates.')
+      where += ` AND date(r.date_recorded)${field === 'from' ? '>=' : '<='}?`; parameters.push(input[field])
+    }
+    if (typeof input.from === 'string' && typeof input.to === 'string' && input.from > input.to) throw new Error('The start date must not follow the end date.')
+    const rows = this.database.all<{ recordingId: string; title: string; recordedAt: string; projectId: string | null; outcome: string; summaryStale: number }>(`SELECT r.id AS recordingId,COALESCE(r.title,r.filename) AS title,r.date_recorded AS recordedAt,r.project_id AS projectId,o.value AS outcome,COALESCE(v.summary_version,0)<COALESCE((SELECT max(t.version) FROM transcript_revisions t WHERE t.recording_id=r.id),0) AS summaryStale FROM summaries s JOIN recordings r ON r.id=s.recording_id LEFT JOIN recording_overviews v ON v.recording_id=r.id JOIN json_each(s.outcomes) o${where} ORDER BY r.date_recorded DESC,r.id,CAST(o.key AS INTEGER) LIMIT ? OFFSET ?`, [...parameters, limit + 1, offset])
+    return { outcomes: rows.slice(0, limit).flatMap(({ outcome, summaryStale, ...recording }) => readMeetingOutcomes('[' + outcome + ']', '').map(item => ({ ...item, ...recording, summaryStale: summaryStale === 1 }))), nextOffset: rows.length > limit ? offset + limit : null }
   }
   private recording(input: Record<string, unknown>): unknown {
     const id = validateId(input.recordingId)
