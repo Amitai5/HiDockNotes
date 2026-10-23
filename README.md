@@ -32,6 +32,8 @@ The desktop application remains available as a rollback option while physical br
 
 Released images are published to **`ghcr.io/amitai5/hidocknotes:<version>`**. Download `compose.yaml` from a release, copy [.env.example](.env.example) to `.env`, and set your HTTPS website origin and persistent library/backup dataset paths.
 
+To follow the newest stable release on each deployment, use `image: ghcr.io/amitai5/hidocknotes:latest` with `pull_policy: always` in the service. Pull/redeploy the app in TrueNAS to apply an update; a running container does not update itself.
+
 ```sh
 docker compose pull
 docker compose up -d

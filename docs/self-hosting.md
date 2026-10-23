@@ -23,6 +23,15 @@ The code is printed only while no owner account exists. Once the owner is create
 
 The image is `ghcr.io/amitai5/hidocknotes:<version>`. Each release also publishes `docker-image.json`, including the exact source commit and immutable image digest. To pin the exact image, replace the Compose `image:` value with the file's `pinnedImage` value. The pipeline uses the repository's GitHub token to publish; no Docker Hub account is required. If the GHCR package is private, configure a registry credential with `read:packages` in TrueNAS, or make the package public once in GitHub Packages for anonymous pulls.
 
+To track the newest stable release, replace the service's image and add its pull policy:
+
+```yaml
+image: ghcr.io/amitai5/hidocknotes:latest
+pull_policy: always
+```
+
+Compose checks the registry when deploying with `docker compose up -d`; TrueNAS must pull/redeploy the app to apply a new image. This does not poll for updates or replace a running container automatically. An engine restart alone does not pull an image. The `latest` tag is promoted from the verified image only after its stable GitHub release is published; drafts and prereleases cannot become `latest`. Versioned tags and immutable digests remain available for pinned deployments.
+
 Compose publishes only port 10708 by default and sets the app's internal `PORT` to match. Set `WEB_PORT` to change both together. A direct image run without `PORT` still defaults to 3000. Preserve streaming responses for `/api/v1/events` and allow the upload sizes you intend to use through your proxy. Standard browser uploads are limited to 2 GB per audio file; backup restores are limited to 20 GB through the website.
 
 ### Cloudflare Tunnel
@@ -133,7 +142,7 @@ docker build --build-arg APP_BUILD=prebuilt -t hidocknotes:local .
 
 For a source build entirely inside Docker, omit `APP_BUILD=prebuilt`. For local development, build the worker bundles first, then use `npm run dev:web` and the server with `APP_ORIGIN=http://localhost:5173`. Point `DATA_DIR` and `BACKUP_DIR` to new development directories. Never point development at the installed desktop profile or a production NAS library.
 
-The release workflow validates the maintained web/server/protocol code once, compiles the Vite and Node assets once, then reuses those artifacts for the container. Native dependencies are installed inside the Linux image. Container startup, static PWA assets and authentication are smoke-tested before GHCR publication. Version and commit tags are published, and the release waits for both the image and all existing platform installers. BuildKit/npm caches accelerate subsequent builds. The exact image digest, Compose file, PWA archive and checksums accompany the release.
+The release workflow validates the maintained web/server/protocol code once, compiles the Vite and Node assets once, then reuses those artifacts for the container. Native dependencies are installed inside the Linux image. Container startup, static PWA assets and authentication are smoke-tested before GHCR publication. Version and commit tags are published, and the release waits for both the image and all existing platform installers. A serialized final job resolves the current published stable release, verifies its Docker metadata checksum and source tag, then promotes its existing immutable image to `latest` without rebuilding. Rerunning the workflow for an already-published version also reconciles `latest` without rebuilding installers. BuildKit/npm caches accelerate subsequent builds. The exact image digest, Compose file, PWA archive and checksums accompany the release.
 
 Source layout: `apps/web` is the browser/PWA client; `apps/server` is HTTP/auth/storage/runtime orchestration; `packages/core` holds domain, persistence, processing and integration services; `packages/jensen-protocol` is the injected WebUSB protocol. `apps/electron` remains a rollback reference and installer target until the physical USB gate passes; it is not imported by the web build.
 
