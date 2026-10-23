@@ -34,37 +34,6 @@ Compose checks the registry when deploying with `docker compose up -d`; TrueNAS 
 
 Compose publishes only port 10708 by default and sets the app's internal `PORT` to match. Set `WEB_PORT` to change both together. A direct image run without `PORT` still defaults to 3000. Preserve streaming responses for `/api/v1/events` and allow the upload sizes you intend to use through your proxy. Standard browser uploads are limited to 2 GB per audio file; backup restores are limited to 20 GB through the website.
 
-### Automatic image updates on TrueNAS
-
-Use the `latest` image and `pull_policy: always`, then schedule the included [TrueNAS updater](../scripts/deployment/truenas_auto_update.py) as a host Cron Job. It uses the built-in Python standard library, the local `midclt` client and read-only Docker inspection. All image pulls and redeployments go through TrueNAS's app-management API. It targets only the app named `hidocknotes` and its matching Compose service.
-
-Install the script once in the TrueNAS Shell:
-
-```sh
-sudo curl --fail --location --output /mnt/ContainerPool/HiDockNotes/hidocknotes-auto-update.py https://raw.githubusercontent.com/Amitai5/HiDockNotes/production/scripts/deployment/truenas_auto_update.py
-sudo chown root:root /mnt/ContainerPool/HiDockNotes/hidocknotes-auto-update.py
-sudo chmod 600 /mnt/ContainerPool/HiDockNotes/hidocknotes-auto-update.py
-sudo /usr/bin/python3 /mnt/ContainerPool/HiDockNotes/hidocknotes-auto-update.py --check
-```
-
-The `--check` command pulls the latest image and reports whether it differs from the running container; it does not redeploy. A failed registry pull leaves the app running. The script also leaves intentionally stopped apps alone.
-
-In **System Settings → Advanced → Cron Jobs → Add** (or **System → Advanced Settings** on newer versions), configure:
-
-| Setting | Value |
-| --- | --- |
-| Description | HiDockNotes automatic image updates |
-| Command | `/usr/bin/python3 /mnt/ContainerPool/HiDockNotes/hidocknotes-auto-update.py` |
-| Run as user | `root` |
-| Schedule | Every 15 minutes; custom minute `*/15`, other fields `*` |
-| Hide standard output | Enabled |
-| Hide standard error | Disabled |
-| Enabled | Enabled |
-
-The host task needs administrator access to the local TrueNAS API and Docker inspection; the HiDockNotes container retains UID/GID `568:568` as configured in its YAML. The script exits between checks and opens no ports. It pulls without stopping the app, compares image IDs with the running container, and redeploys only when they differ. A host lock prevents overlapping runs. After an update it waits up to three minutes for the container healthcheck and reports failure to cron's standard error. Configure TrueNAS system email if you want cron errors delivered by email. Failed redeployments are retried on later runs; the script does not automatically roll back database migrations.
-
-Updates briefly interrupt the website, uploads and live recording. To avoid interruptions during the day, use a daily 03:00 schedule instead of every 15 minutes. Keep the library and backup datasets in your existing snapshot policy. The updater requires a one-time installation on the NAS; editing Compose alone cannot schedule it.
-
 ### Cloudflare Tunnel
 
 For a tunnel connector using the NAS host network, configure the published application as:
