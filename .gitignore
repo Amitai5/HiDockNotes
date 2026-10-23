@@ -31,3 +31,7 @@ models/
 *.pem
 *.key
 /apps/electron/resources/update-policy.json
+
+# Hosted development data is always isolated from the installed desktop library
+.local-data/
+.local-backups/

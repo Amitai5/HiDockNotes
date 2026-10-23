@@ -66,7 +66,7 @@ SOFTWARE.
 
 ## Interface icons
 
-Interface icons use lucide-react 0.460.0. The app and installer artwork is original generated artwork; its source and generation details are in `apps/electron/resources/branding/README.md`.
+Interface icons use lucide-react 0.460.0. The app and installer icon uses the supplied note artwork; its source and export details are in `apps/electron/resources/branding/README.md`.
 
 ISC License
 

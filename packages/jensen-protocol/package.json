@@ -34,7 +34,7 @@
     "@types/w3c-web-usb": "^1.0.13",
     "tsup": "^8.5.1",
     "typescript": "^5.6.0",
-    "vitest": "^4.1.9"
+    "vitest": "4.1.12"
   },
   "overrides": {
     "esbuild": "^0.28.1",

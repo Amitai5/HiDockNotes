@@ -1,0 +1,38 @@
+{
+  "name": "hidocknotes-web",
+  "version": "0.15.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hidock/jensen-protocol": "file:../../packages/jensen-protocol",
+    "@radix-ui/react-alert-dialog": "^1.1.15",
+    "@radix-ui/react-dialog": "^1.1.2",
+    "@radix-ui/react-switch": "^1.1.1",
+    "lucide-react": "0.460.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-markdown": "10.1.0",
+    "react-router-dom": "^7.18.2",
+    "remark-gfm": "4.0.1",
+    "zustand": "^5.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.1",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.3",
+    "jsdom": "^27.4.0",
+    "tailwindcss": "4.3.3",
+    "vite": "7.3.7",
+    "vite-plugin-pwa": "^1.0.3",
+    "vitest": "4.1.12"
+  }
+}

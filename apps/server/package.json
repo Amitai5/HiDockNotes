@@ -1,0 +1,26 @@
+{
+  "name": "hidocknotes-server",
+  "version": "0.15.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.cjs",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.cjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/static": "10.1.7",
+    "@hidock/core": "file:../../packages/core",
+    "fastify": "^5.6.2"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "tsx": "^4.20.6",
+    "vitest": "4.1.12"
+  }
+}

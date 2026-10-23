@@ -1,12 +1,15 @@
 {
   "name": "hidocknotes",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "private": true,
   "license": "MIT",
   "packageManager": "npm@11.21.0",
   "workspaces": [
     "apps/electron",
-    "packages/jensen-protocol"
+    "apps/web",
+    "apps/server",
+    "packages/jensen-protocol",
+    "packages/core"
   ],
   "allowScripts": {
     "electron": true,
@@ -23,20 +26,27 @@
     "sharp": false
   },
   "scripts": {
-    "dev": "npm run dev --workspace=apps/electron",
-    "build": "npm run build --workspace=packages/jensen-protocol && npm run build --workspace=apps/electron",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint apps/electron packages/jensen-protocol/src packages/jensen-protocol/tests scripts/release",
-    "test": "npm run test:release && npm run test --workspaces --if-present",
+    "dev": "npm run dev --workspace=apps/server",
+    "build": "npm run build:web",
+    "typecheck": "npm run typecheck --workspace=packages/jensen-protocol && npm run typecheck --workspace=packages/core && npm run typecheck --workspace=apps/server && npm run typecheck --workspace=apps/web",
+    "lint": "eslint apps/web packages/core/src apps/server packages/jensen-protocol/src packages/jensen-protocol/tests scripts/release",
+    "test": "npm run test:release && npm run test --workspace=packages/jensen-protocol && npm run test:web",
     "test:release": "node --test scripts/release/*.test.cjs",
-    "release:check": "node scripts/release/version.cjs",
+    "release:check": "node scripts/release/version.cjs && node scripts/release/hosted.cjs",
     "release:version": "node scripts/release/version.cjs",
     "smoke:native": "node scripts/release/native-smoke.cjs",
     "smoke:package": "node scripts/release/native-smoke.cjs --packaged",
-    "start": "npm run start --workspace=apps/electron",
-    "package:win": "npm run build && npm run package:win --workspace=apps/electron",
-    "package:mac": "npm run build && npm run package:mac --workspace=apps/electron",
-    "package:linux": "npm run build && npm run package:linux --workspace=apps/electron"
+    "start": "npm run start:web",
+    "package:win": "npm run build:desktop && npm run package:win --workspace=apps/electron",
+    "package:mac": "npm run build:desktop && npm run package:mac --workspace=apps/electron",
+    "package:linux": "npm run build:desktop && npm run package:linux --workspace=apps/electron",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build:web": "npm run build --workspace=packages/jensen-protocol && npm run build --workspace=apps/web && npm run build --workspace=apps/server",
+    "start:web": "npm run start --workspace=apps/server",
+    "test:web": "npm run test --workspace=packages/core && npm run test --workspace=apps/server && npm run test --workspace=apps/web",
+    "build:desktop": "npm run build --workspace=packages/jensen-protocol && npm run build --workspace=apps/electron",
+    "dev:desktop": "npm run dev --workspace=apps/electron",
+    "start:desktop": "npm run start --workspace=apps/electron"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

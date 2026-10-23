@@ -4,7 +4,9 @@
 
 Turn HiDock recordings and imported audio into searchable transcripts, meeting notes, and action items.
 
-HiDockNotes is a desktop app for Windows, macOS, and Linux. Your recording library stays on your computer, transcription runs locally by default, and an optional AI connection generates summaries and answers questions with links to the original conversation.
+HiDockNotes is a private recording library you can host on your own server. Open it as a website or install the same interface as a PWA. Sync a HiDock directly from desktop Chrome or Edge, upload existing audio, and access your transcripts, meeting notes, tasks and Assistant from any device. Audio storage, CPU transcription and optional semantic search run on the server. ChatGPT plan and API connections can generate summaries and source-linked answers.
+
+The desktop application remains available as a rollback option while physical browser/PWA USB validation is completed. The web build has no Electron runtime or native helper.
 
 **[Download the latest release](https://github.com/Amitai5/HiDockNotes/releases/latest)** · [Release history](https://github.com/Amitai5/HiDockNotes/releases) · [Report an issue](https://github.com/Amitai5/HiDockNotes/issues)
 
@@ -26,7 +28,23 @@ HiDockNotes is a desktop app for Windows, macOS, and Linux. Your recording libra
 | Export and recovery | Export notes, subtitles, and playable audio; back up and restore the complete library. |
 | MCP access | Let an MCP-compatible agent search recordings by meaning and read notes, meeting outcomes, tasks, and saved reference context through a local, read-only connection. |
 
-## Install
+## Install on TrueNAS or another Docker server
+
+Released images are published to **`ghcr.io/amitai5/hidocknotes:<version>`**. Download `compose.yaml` from a release, copy [.env.example](.env.example) to `.env`, and set your HTTPS website origin and persistent library/backup dataset paths.
+
+```sh
+docker compose pull
+docker compose up -d
+docker compose logs hidocknotes
+```
+
+Open the website and copy the **eight-character setup code from the container logs** to create your owner account. It uses letters and digits without confusing `0/O` or `1/I`. The code is shown only before owner setup. Your data persists in `/data`; complete backup archives go to `/backups`.
+
+In Chrome or Edge, choose **Install** in the app header or browser menu for a standalone PWA window. Direct HiDock USB needs HTTPS and an open tab/PWA window. Other browsers can use the library and upload audio. The server needs no USB passthrough.
+
+See the [self-hosting guide](docs/self-hosting.md) for dataset permissions, resource limits, ChatGPT sign-in through an SSH tunnel, desktop backup migration, restore, MCP, updates and the physical USB validation gate. Releases include a PWA archive, Compose configuration and the exact GHCR image digest alongside the platform installers.
+
+## Desktop installers
 
 Open [the latest GitHub release](https://github.com/Amitai5/HiDockNotes/releases/latest), expand **Assets**, and choose the installer for your computer. The installers bundle the application runtime and audio conversion tools.
 
@@ -139,13 +157,13 @@ Open **Settings → Device & storage → Library backup**.
 - **Create backup** saves a complete `.tar.gz` archive: original local audio, transcripts and revisions, summaries, projects, tags, action items and completion history, voice profiles and samples, saved chats/messages/citations, linked calendar metadata, settings, and recovery metadata. Audio in custom storage folders is included.
 - **Choose backup** verifies an archive and previews its contents before restoring. Restore replaces the current library; it does not merge libraries. You must save a complete safety backup of the current library before the replacement proceeds.
 
-Download device-only recordings first if you want their audio included. Rebuildable models and caches are excluded. Backups contain private audio, text, and voice data and are **not encrypted archives**. Saved credentials remain operating-system-encrypted and may need reconnecting after a move to another computer.
+Download device-only recordings first if you want their audio included. Rebuildable models and caches are excluded. Backups contain private audio, text, and voice data and are **not encrypted archives**. Saved credentials stay encrypted; reconnect accounts after restoring on the server.
 
 After restore, AI accounts and calendar feeds are disconnected, MCP access and optional meaning search are disabled, and automatic processing/device connection are paused for review. Saved conversations and linked event details remain available. Reconnect your accounts/calendars, review settings, and explicitly resume processing. Search model files can be downloaded again when you enable the feature. See the [recovery guide](docs/backup-transcripts-updates.md#restore-a-complete-library).
 
 ## Privacy and storage
 
-| Operation | What leaves your computer |
+| Operation | What leaves your server |
 | --- | --- |
 | Local Whisper transcription and voice matching | No recording audio or voice embeddings. Model files download on first use. |
 | Optional search by meaning | No recording text or embeddings. The model files download only when you enable the feature. |
@@ -155,21 +173,21 @@ After restore, AI accounts and calendar feeds are disconnected, MCP access and o
 | Assistant | Your question, recent chat context, retrieved recording excerpts, and applicable reference context sent to the selected text provider. |
 | MCP reads | HiDockNotes serves data locally; a cloud-backed agent may send the returned text to its own provider. |
 
-API keys and ChatGPT sessions are encrypted using the operating system's credential protection. The library database, audio files, and backup archives are not encrypted by HiDockNotes. Provider data handling and usage policies apply to anything you send to a cloud service.
+The server encrypts API keys, ChatGPT sessions and private calendar links with its persistent server key. The library database, audio files, and backup archives are not encrypted by HiDockNotes. Provider data handling and usage policies apply to anything you send to a cloud service.
 
-Metadata lives in `data/library.db` under the app's user-data directory; recordings default to its `recordings` folder. **Settings → Device & storage → New recordings folder** changes where new audio is saved. Existing recordings retain their paths. Use the complete backup feature to move or recover a library rather than copying only the database.
+Server metadata lives in `/data/data/library.db`; audio lives under the persistent `/data` volume. Manage those paths through Docker volumes. Use a complete backup to move or recover a library. The desktop fallback retains its original local storage settings.
 
 ### Delete a recording
 
-Choose **Delete recording** from its menu and confirm. For a device recording, connect the original recorder and let its current operation finish. The app verifies the local copy and waits for the recorder's deletion acknowledgement before removing local data. Imported recordings are removed locally.
+Choose **Delete recording** from its menu and confirm. The server removes the recording and its associated data immediately. Cleanup of the original HiDock copy is queued for the next authorized browser connection to the same recorder, after verifying its checksum. Imported files are removed from the server.
 
 Deletion removes that recording's audio, transcript, summary, action items, tags, caches, and contributed voice samples. Shared projects and other recordings' voice data remain. Deletion cannot be undone; create a backup first if you may need the recording again.
 
 ## Connect an MCP client
 
-1. Keep HiDockNotes running and open **Settings → Agent connections**.
+1. Open **Settings → Agent connections** on your hosted website.
 2. Enable **MCP access**. It is off by default.
-3. Choose **Copy configuration** and add the generated JSON server entry to your client's MCP settings. Clients with separate fields can use its command, arguments, and environment values. The app supplies the required executable and launcher paths.
+3. Choose **Copy configuration** and add the generated JSON server entry to your client's MCP settings. The configuration contains the server HTTPS URL and a read-only bearer token.
 4. Ask the agent to find recordings, read notes, or list action items. Disable MCP access to revoke reads.
 
 | Tool | Use |
@@ -184,7 +202,7 @@ Deletion removes that recording's audio, transcript, summary, action items, tags
 
 Meaning search uses the model enabled in **Settings → AI**; MCP reads never download it automatically. If it is unavailable, results explicitly report keyword fallback. Outcome kinds are `decision`, `open_question`, `risk`, and `next_step`; date filters use inclusive UTC recording dates (`from`/`to`, `YYYY-MM-DD`). Results identify transcript-backed versus older summary-derived entries and flag summaries made stale by transcript edits. See [MCP tool examples](docs/mcp-tools.md).
 
-The bundled stdio launcher needs no separate Node installation or Codex/Claude terminal command. Access is read-only: it excludes audio, voice embeddings, credentials, arbitrary filesystem access, and device operations. If the installation path changes, copy the configuration again.
+The hosted MCP endpoint uses stateless Streamable HTTP. Turning access off revokes its tokens. Tools exclude audio, voice embeddings, credentials, arbitrary filesystem access and device operations. The legacy desktop app retains its local stdio launcher.
 
 ## Troubleshooting
 
@@ -210,11 +228,11 @@ git clone --branch production https://github.com/Amitai5/HiDockNotes.git
 cd HiDockNotes
 npm install --global npm@11.21.0 --ignore-scripts
 npm ci --strict-allow-scripts
-npm run build
-npm run dev
+npm run build:web
+npm run start:web
 ```
 
-After building, `npm start` opens the built application. On Windows, `Launch.cmd` also opens an existing build; keep `node_modules` and `apps/electron/out` in place.
+After building, `npm start` serves the website at `http://localhost:3000`. Use `npm run dev:web` for Vite development alongside the server. The desktop fallback uses `npm run build:desktop` and `npm run start:desktop`; `Launch.cmd` still opens that desktop build.
 
 ### Verify and package
 
@@ -236,15 +254,17 @@ Packages are written to `release/<version>/`. Run `npm run smoke:package` after 
 
 ### Release workflow
 
-[Build installers and release](https://github.com/Amitai5/HiDockNotes/actions/workflows/release.yml) runs on pushes to `production` and supports manual runs from that branch. For a new version, use `npm run release:version -- 0.13.1` as an example, run `npm run release:check`, then commit and push the intended changes. Choose an unpublished version; existing public versions are skipped.
+[Build apps, Docker image and release](https://github.com/Amitai5/HiDockNotes/actions/workflows/release.yml) runs on pushes to `production` and supports manual runs from that branch. For a new version, use `npm run release:version -- 0.13.1` as an example, run `npm run release:check`, then commit and push the intended changes. Choose an unpublished version; existing public versions are skipped.
 
 The workflow typechecks, lints, runs the complete test suite, and compiles the Vite application once. Four parallel packaging jobs reuse that exact commit's compiled output, install native dependencies on their own Windows/Linux/macOS runners, and check real CPU inference before and after packaging. npm downloads and per-platform Electron, FFmpeg and packaging tools are cached; installers omit unused ONNX platforms and architectures. Intel Mac support uses a pinned compatible ONNX runtime.
 
-The workflow tests and packages Windows x64, Linux x64, Intel Mac, and Apple Silicon Mac separately. After all four builds and packaged checks succeed, it publishes the five installers and `SHA256SUMS.txt` to a GitHub release tagged at the tested commit. Signing and notarization configuration is documented in the [release signing guide](docs/backup-transcripts-updates.md#configure-signed-releases).
+The workflow tests and packages Windows x64, Linux x64, Intel Mac, and Apple Silicon Mac separately. After all four builds, packaged checks, and the container smoke test succeed, it publishes the five installers, web/PWA archive, Compose file, Docker image metadata and `SHA256SUMS.txt` to a GitHub release tagged at the tested commit. Signing and notarization configuration is documented in the [release signing guide](docs/backup-transcripts-updates.md#configure-signed-releases).
 
 ### Architecture
 
-Electron, strict TypeScript, React, and Tailwind provide the desktop app. The main process owns SQLite and USB access; utility processes handle audio, local text embeddings, and calendar parsing. The sandboxed renderer uses a typed, allowlisted preload bridge. Search combines SQLite FTS5 with optional local embeddings stored in SQLite. Speech and text embedding runtimes use separate workers.
+The website/PWA lives in `apps/web`, the Fastify server in `apps/server`, and shared domain/storage/processing code in `packages/core`. See [self-hosting](docs/self-hosting.md) for web development and Docker builds.
+
+The legacy desktop fallback uses Electron, strict TypeScript, React, and Tailwind provide the desktop app. The main process owns SQLite and USB access; utility processes handle audio, local text embeddings, and calendar parsing. The sandboxed renderer uses a typed, allowlisted preload bridge. Search combines SQLite FTS5 with optional local embeddings stored in SQLite. Speech and text embedding runtimes use separate workers.
 
 - `apps/electron/src` — interface and shared contracts.
 - `apps/electron/electron` — main process, preload, device services, and processing worker.

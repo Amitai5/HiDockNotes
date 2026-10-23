@@ -1,6 +1,6 @@
 {
   "name": "hidocknotes-app",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "A private recording library for HiDock devices.",
   "main": "out/main/index.js",
   "license": "MIT",
@@ -46,12 +46,12 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.3",
-    "electron": "44.4.1",
+    "electron": "44.9.3",
     "electron-builder": "26.17.0",
     "electron-vite": "5.0.0",
     "jsdom": "^27.4.0",
     "tailwindcss": "4.3.3",
-    "vite": "7.3.1",
-    "vitest": "^4.1.11"
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
   }
 }

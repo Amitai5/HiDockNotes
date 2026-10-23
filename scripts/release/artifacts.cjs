@@ -45,8 +45,8 @@ async function checksum(file) {
   return hash.digest('hex')
 }
 
-async function verifyArtifacts(directory, version, signed = false) {
-  const expected = Object.values(expectedArtifacts(version, signed)).flat().sort()
+async function verifyArtifacts(directory, version, signed = false, hosted = false) {
+  const expected = [...Object.values(expectedArtifacts(version, signed)).flat(), ...(hosted ? [`HiDockNotes-${version}-web.tar.gz`, 'docker-image.json', 'compose.yaml'] : [])].sort()
   const actual = fs.readdirSync(directory).filter(name => name !== 'SHA256SUMS.txt' && !(signed && ['updates.json', 'updates.json.sig'].includes(name))).sort()
   if (JSON.stringify(actual) !== JSON.stringify(expected)) { throw new Error('Release must contain exactly the Windows, Linux AppImage/deb, Intel Mac and Apple Silicon Mac installers.') }
   const artifacts = []

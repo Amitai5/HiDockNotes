@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 const MIN_PANEL = 300
-const DEFAULT_PANEL = 380
+const DEFAULT_PANEL = 480
 export function RecordingWorkspace({ notes, media }: { notes: ReactNode; media: ReactNode }): JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; width: number } | null>(null)

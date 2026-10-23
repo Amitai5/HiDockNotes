@@ -21,7 +21,7 @@ function LibraryFolder({ id, name, count, recordings, active }: { id: string | n
 
 export function LibrarySidebar(): JSX.Element {
   const { projects, looseRecordings, projectRecordings } = useLibraryNavigation()
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const location = useLocation()
   const query = new URLSearchParams(location.search)
   const inLibrary = location.pathname.startsWith('/library')

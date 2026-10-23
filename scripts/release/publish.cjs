@@ -26,7 +26,7 @@ async function main() {
   if (release && !release.draft) { console.log(`${tag} is already published.`); return }
   const directory = path.join(root, 'release', 'ci-assets')
   const signed = process.env.HIDOCKNOTES_SIGNED_RELEASE === 'true'
-  const installers = await verifyArtifacts(directory, version, signed)
+  const installers = await verifyArtifacts(directory, version, signed, process.env.HIDOCK_HOSTED_RELEASE === 'true')
   if (signed) {
     const result = signManifest({ format: 1, version, commit, artifacts: installers })
     for (const [name, bytes] of [['updates.json', result.bytes], ['updates.json.sig', result.signature]]) {
@@ -42,7 +42,7 @@ async function main() {
   if (!existingCommit) { await api('git/refs', 'POST', { ref: `refs/tags/${tag}`, sha: commit }) }
 
   const notes = path.join(root, 'release', 'release-notes.md')
-  fs.writeFileSync(notes, `## Installers\n\n| Platform | Download |\n| --- | --- |\n| Windows (x64) | \`HiDockNotes-${version}-windows-x64-setup.exe\` |\n| Linux (x64) | \`HiDockNotes-${version}-linux-x64.AppImage\` or \`HiDockNotes-${version}-linux-x64.deb\` |\n| macOS (Intel) | \`HiDockNotes-${version}-macos-x64.dmg\` |\n| macOS (Apple Silicon) | \`HiDockNotes-${version}-macos-arm64.dmg\` |\n\nInstallers are built on native GitHub runners. SHA256SUMS.txt verifies the published installers and update assets. ${signed ? 'Windows installers are Authenticode signed; macOS apps are Developer ID signed and notarized. Linux downloads and update feeds are covered by the Ed25519-signed updates.json manifest. In-app updates verify the release and create a library safety backup before installation.' : 'Signing credentials are not configured for this build. Windows installers are unsigned; macOS apps are ad-hoc signed and not notarized. Use the manual installers; in-app installation is disabled.'}\n\nOn Linux, make the AppImage executable before opening it, or install the Debian package with your package manager. Local speech models download when first needed.\n\nSource: [${commit}](${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}/tree/${commit}). App and bundled third-party licenses are included.\n`)
+  fs.writeFileSync(notes, `## Website, PWA and Docker\n\nPull \`ghcr.io/amitai5/hidocknotes:${version}\`. The web/PWA archive, compose.yaml and docker-image.json are attached. The image metadata includes its immutable digest. Browser USB verification on a physical recorder is still pending; desktop installers remain available for rollback.\n\n## Installers\n\n| Platform | Download |\n| --- | --- |\n| Windows (x64) | \`HiDockNotes-${version}-windows-x64-setup.exe\` |\n| Linux (x64) | \`HiDockNotes-${version}-linux-x64.AppImage\` or \`HiDockNotes-${version}-linux-x64.deb\` |\n| macOS (Intel) | \`HiDockNotes-${version}-macos-x64.dmg\` |\n| macOS (Apple Silicon) | \`HiDockNotes-${version}-macos-arm64.dmg\` |\n\nInstallers are built on native GitHub runners. SHA256SUMS.txt verifies the published installers and update assets. ${signed ? 'Windows installers are Authenticode signed; macOS apps are Developer ID signed and notarized. Linux downloads and update feeds are covered by the Ed25519-signed updates.json manifest. In-app updates verify the release and create a library safety backup before installation.' : 'Signing credentials are not configured for this build. Windows installers are unsigned; macOS apps are ad-hoc signed and not notarized. Use the manual installers; in-app installation is disabled.'}\n\nOn Linux, make the AppImage executable before opening it, or install the Debian package with your package manager. Local speech models download when first needed.\n\nSource: [${commit}](${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}/tree/${commit}). App and bundled third-party licenses are included.\n`)
   const gh = (...args) => execFileSync('gh', [...args, '--repo', process.env.GITHUB_REPOSITORY], { stdio: 'inherit' })
   const prerelease = version.includes('-')
   if (!release) {
@@ -52,6 +52,13 @@ async function main() {
   gh('release', 'upload', tag, ...expected.map(file => path.join(directory, file.name)), '--clobber')
   const assets = await api(`releases/${release.id}/assets?per_page=100`)
   verifyUploadedAssets(assets, expected)
+  if (process.env.HIDOCK_HOSTED_RELEASE === 'true') {
+    const image = JSON.parse(fs.readFileSync(path.join(directory, 'docker-image.json'), 'utf8'))
+    const verified = require('./hosted.cjs').imageMetadata(version, image.digest, commit)
+    if (JSON.stringify(image) !== JSON.stringify(verified)) throw new Error('Container metadata does not match the verified release.')
+    // Promote the already-tested immutable image only after the version tag and assets are verified.
+    execFileSync('docker', ['buildx', 'imagetools', 'create', '--prefer-index=false', '--tag', verified.image, verified.pinnedImage], { stdio: 'inherit' })
+  }
   const published = await api(`releases/${release.id}`, 'PATCH', { draft: false, prerelease, make_latest: prerelease ? 'false' : 'legacy' })
   console.log(`Published ${published.html_url}`)
   if (process.env.GITHUB_STEP_SUMMARY) { fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Published [HiDockNotes ${version}](${published.html_url}) with platform installers, update assets and SHA-256 checksums.\n`) }

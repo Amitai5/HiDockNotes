@@ -1,0 +1,7 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const { removeChild, pruneRuntime } = require('./prune-container.cjs')
+test('container pruning retains exactly the selected native platform and architecture', () => { const root=fs.mkdtempSync(path.join(os.tmpdir(),'hidock-prune-'));try{for(const platform of ['linux','darwin','win32'])for(const arch of ['x64','arm64']){const folder=path.join(root,platform,arch);fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,'binding.node'),'fixture')}pruneRuntime(root,'linux','x64');assert.deepEqual(fs.readdirSync(root),['linux']);assert.deepEqual(fs.readdirSync(path.join(root,'linux')),['x64']);assert.ok(fs.existsSync(path.join(root,'linux','x64','binding.node')));assert.throws(()=>removeChild(root,'../outside'),/outside/)}finally{const resolved=path.resolve(root);assert.equal(path.dirname(resolved),path.resolve(os.tmpdir()));fs.rmSync(resolved,{recursive:true,force:true})} })

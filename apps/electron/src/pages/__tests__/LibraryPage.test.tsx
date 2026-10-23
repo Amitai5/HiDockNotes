@@ -45,6 +45,8 @@ describe('project folders inside Library', () => {
     expect(page.getByRole('link', { name: /Quick thought/ })).toBeVisible()
     expect(page.queryByRole('link', { name: /Project call/ })).toBeNull()
     const sidebar = within(screen.getByRole('complementary'))
+    expect(sidebar.getByRole('link', { name: /Team/ })).toBeVisible()
+    fireEvent.click(sidebar.getByRole('button', { name: 'Collapse library folders' }))
     expect(sidebar.queryByRole('link', { name: /Team/ })).toBeNull()
     fireEvent.click(sidebar.getByRole('button', { name: 'Expand library folders' }))
     expect(sidebar.getByRole('link', { name: /Team/ })).toHaveAttribute('href', '/library?project=team')
@@ -86,7 +88,7 @@ describe('project folders inside Library', () => {
   })
   it('updates sidebar membership when project assignment or a recording title changes', async () => {
     show()
-    fireEvent.click(screen.getByRole('button', { name: 'Expand library folders' }))
+    expect(screen.getByRole('button', { name: 'Collapse library folders' })).toHaveAttribute('aria-expanded', 'true')
     await screen.findByRole('button', { name: 'Expand Unfiled recordings' })
     fireEvent.click(screen.getByRole('button', { name: 'Expand Unfiled recordings' }))
     await within(screen.getByRole('complementary')).findByRole('link', { name: 'Quick thought' })
@@ -96,7 +98,7 @@ describe('project folders inside Library', () => {
   })
   it('expands and collapses individual project folders', async () => {
     show()
-    fireEvent.click(screen.getByRole('button', { name: 'Expand library folders' }))
+    expect(screen.getByRole('button', { name: 'Collapse library folders' })).toHaveAttribute('aria-expanded', 'true')
     fireEvent.click(await screen.findByRole('button', { name: 'Expand Team' }))
     expect(within(screen.getByRole('complementary')).getByRole('link', { name: 'Project call' })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Collapse Team' }))
@@ -141,7 +143,7 @@ describe('project folders inside Library', () => {
   })
   it('makes Unfiled a distinct sidebar destination and accepts drops there from a project', async () => {
     show('/library?project=team')
-    fireEvent.click(screen.getByRole('button', { name: 'Expand library folders' }))
+    expect(screen.getByRole('button', { name: 'Collapse library folders' })).toHaveAttribute('aria-expanded', 'true')
     const unfiled = await within(screen.getByRole('complementary')).findByRole('link', { name: /Unfiled recordings/ })
     expect(unfiled.closest('.library-unfiled-folder')).not.toBeNull()
     fireEvent.drop(unfiled, { dataTransfer: { types: [RECORDING_DRAG_TYPE], getData: () => 'filed' } })

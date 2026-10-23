@@ -19,7 +19,7 @@ if (typeof electron === 'string') {
     const root = resolve(__dirname, '..'), resources = join(root, 'apps/electron/resources')
     const source = join(resources, 'branding/hidocknotes-icon.png')
     const image = nativeImage.createFromPath(source), size = image.getSize()
-    if (image.isEmpty() || size.width !== size.height || size.width < 1024) throw new Error('The master icon must be a square PNG of at least 1024 pixels.')
+    if (image.isEmpty() || size.width !== size.height || size.width < 512) throw new Error('The master icon must be a square PNG of at least 512 pixels.')
     const force = process.argv.includes('--force')
     const targets = [join(resources, 'icon.png'), join(resources, 'icon.ico'), join(resources, 'icon.icns'), join(root, 'apps/electron/public/app-icon.png'), join(root, 'apps/electron/src/assets/brand-mark.png')]
     if (!force && targets.some(existsSync)) throw new Error('Icon output already exists. Use --force to regenerate the app assets.')

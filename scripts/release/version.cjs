@@ -14,7 +14,6 @@ function assertVersion(version) {
   }
   return version
 }
-
 function validateManifests(manifests) {
   const version = assertVersion(manifests['apps/electron/product.json'].version)
   const entries = [
@@ -44,15 +43,16 @@ function setVersion(manifests, version) {
   return manifests
 }
 
+module.exports = { root, assertVersion, validateManifests, readVersion, setVersion }
+
 if (require.main === module) {
   try {
     if (process.argv[2]) {
       const manifests = setVersion(readManifests(), process.argv[2])
       validateManifests(manifests)
       for (const file of manifestPaths) { fs.writeFileSync(path.join(root, file), `${JSON.stringify(manifests[file], null, 2)}\n`) }
+      if (fs.existsSync(path.join(root, 'apps/web/package.json'))) require('./hosted.cjs').checkHosted(root, true)
     }
     console.log(`HiDockNotes version ${readVersion()}`)
   } catch (error) { console.error(error.message); process.exitCode = 1 }
 }
-
-module.exports = { root, assertVersion, validateManifests, readVersion, setVersion }
