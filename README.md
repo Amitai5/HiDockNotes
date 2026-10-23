@@ -40,6 +40,8 @@ docker compose logs hidocknotes
 
 Open the website and copy the **eight-character setup code from the container logs** to create your owner account. It uses letters and digits without confusing `0/O` or `1/I`. The code is shown only before owner setup. Your data persists in `/data`; complete backup archives go to `/backups`.
 
+Compose publishes only port **10708**. A Cloudflare Tunnel connector using the NAS host network can point your public hostname to `http://localhost:10708`. Keep `APP_ORIGIN` as the public HTTPS URL and set `APP_ALLOWED_ORIGINS=http://truenas.local:10708` for local sign-in to the same library. CPU and memory settings are upper limits with no reservations.
+
 In Chrome or Edge, choose **Install** in the app header or browser menu for a standalone PWA window. Direct HiDock USB needs HTTPS and an open tab/PWA window. Other browsers can use the library and upload audio. The server needs no USB passthrough.
 
 See the [self-hosting guide](docs/self-hosting.md) for dataset permissions, resource limits, ChatGPT sign-in through an SSH tunnel, desktop backup migration, restore, MCP, updates and the physical USB validation gate. Releases include a PWA archive, Compose configuration and the exact GHCR image digest alongside the platform installers.

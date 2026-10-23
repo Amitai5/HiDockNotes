@@ -1,15 +1,15 @@
 services:
   hidocknotes:
-    image: ghcr.io/amitai5/hidocknotes:${HIDOCKNOTES_VERSION:-0.15.0}
+    image: ghcr.io/amitai5/hidocknotes:${HIDOCKNOTES_VERSION:-0.15.1}
     restart: unless-stopped
     init: true
     user: "${PUID:-1000}:${PGID:-1000}"
     ports:
-      - "${WEB_PORT:-3000}:3000"
-      # SSH-forward this loopback-only port for ChatGPT account setup.
-      - "127.0.0.1:1455:1455"
+      - "${WEB_PORT:-10708}:${WEB_PORT:-10708}"
     environment:
       APP_ORIGIN: "${APP_ORIGIN:?Set the exact HTTPS website origin in .env}"
+      APP_ALLOWED_ORIGINS: "${APP_ALLOWED_ORIGINS:-}"
+      PORT: "${WEB_PORT:-10708}"
       DATA_DIR: /data
       BACKUP_DIR: /backups
       SECRET_KEY_FILE: /data/secrets/server.key
@@ -18,6 +18,7 @@ services:
     volumes:
       - "${HIDOCK_DATA_DIR:?Set the TrueNAS library dataset path}:/data"
       - "${HIDOCK_BACKUP_DIR:?Set the TrueNAS backup dataset path}:/backups"
+    # Upper limits only. No CPU or memory reservation is configured.
     cpus: 8
     mem_limit: 12g
     pids_limit: 256

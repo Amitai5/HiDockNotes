@@ -4,7 +4,7 @@ The server stores your library and runs processing. Open the same website from y
 
 ## Deploy the released image
 
-Use a TrueNAS installation with Docker-based Apps/Compose support and an x86-64 CPU. The initial configuration reserves up to 8 CPUs and 12 GB RAM, runs one processing job at a time, and limits speech inference to four threads. Your 20-core, 64-GB server has room for this CPU-first setup. Integrated graphics are not required.
+Use a TrueNAS installation with Docker-based Apps/Compose support and an x86-64 CPU. The initial configuration limits usage to 8 CPUs and 12 GB RAM, runs one processing job at a time, and limits speech inference to four threads. These are upper limits with no resource reservation. Integrated graphics are not required.
 
 1. Create separate persistent datasets for the library and backup archives. Give the configured container UID/GID write permission. The example uses `1000:1000`; set `PUID`/`PGID` to the dataset owner if different.
 2. Download `compose.yaml` from the release and copy `.env.example` to `.env`.
@@ -23,7 +23,36 @@ The code is printed only while no owner account exists. Once the owner is create
 
 The image is `ghcr.io/amitai5/hidocknotes:<version>`. Each release also publishes `docker-image.json`, including the exact source commit and immutable image digest. To pin the exact image, replace the Compose `image:` value with the file's `pinnedImage` value. The pipeline uses the repository's GitHub token to publish; no Docker Hub account is required. If the GHCR package is private, configure a registry credential with `read:packages` in TrueNAS, or make the package public once in GitHub Packages for anonymous pulls.
 
-The app exposes HTTP on port 3000 behind your existing HTTPS setup. Preserve streaming responses for `/api/v1/events` and allow the upload sizes you intend to use through your proxy. Standard browser uploads are limited to 2 GB per audio file; backup restores are limited to 20 GB through the website. Do not expose the ChatGPT callback port through that proxy.
+Compose publishes only port 10708 by default and sets the app's internal `PORT` to match. Set `WEB_PORT` to change both together. A direct image run without `PORT` still defaults to 3000. Preserve streaming responses for `/api/v1/events` and allow the upload sizes you intend to use through your proxy. Standard browser uploads are limited to 2 GB per audio file; backup restores are limited to 20 GB through the website.
+
+### Cloudflare Tunnel
+
+For a tunnel connector using the NAS host network, configure the published application as:
+
+| Public hostname | Service |
+| --- | --- |
+| `notes.amitai.tech` | `http://localhost:10708` |
+
+Set `APP_ORIGIN=https://notes.amitai.tech`. Cloudflare serves HTTPS to the browser and forwards to the app's HTTP listener. If the connector runs in a separate container with bridge networking, use the NAS LAN IP and port 10708 instead: `localhost` would refer to the connector's own container. No additional application ports need publishing. Keep your existing Cloudflare Access policy if you use one; the app's owner login remains separate.
+
+### Local network access
+
+Keep `APP_ORIGIN` as your public HTTPS address and add exact local addresses to `APP_ALLOWED_ORIGINS`, separated by commas. For example, with host port 10708:
+
+```yaml
+environment:
+  APP_ORIGIN: "https://notes.example.com"
+  APP_ALLOWED_ORIGINS: "http://truenas.local:10708"
+  PORT: "10708"
+ports:
+  - "10708:10708"
+```
+
+The local origin must match the published host port. If you also use a numeric NAS IP, add its full origin separately. Paths, trailing slashes, wildcard hosts and wildcard ports are rejected. Recreate the container after changing these environment variables.
+
+Setup, sign-in, the library, uploads, playback, Assistant and copy buttons work at the allowed HTTP address. HTTP and HTTPS use separate host-only, HttpOnly, SameSite=Strict session cookies; public HTTPS cookies retain Secure protection. Both addresses access the same owner and library, with separate browser sign-ins. Mutation requests still require an allowed Origin and a matching CSRF token. MCP configuration uses the address currently open in the browser.
+
+Plain HTTP sends credentials and library data without transport encryption; use it only on your trusted local network. Direct USB and PWA installation require a secure browser context, so use the HTTPS address for those features. AI workers release transcription models after each job and unload the optional semantic-search model after 60 seconds of inactivity. The 8-CPU and 12-GiB settings are upper limits, not resource reservations.
 
 ## Use the website or install the PWA
 
@@ -53,12 +82,12 @@ To keep using your ChatGPT plan with its loopback callback:
 1. On the computer where you will sign in, open a tunnel to TrueNAS:
 
    ```sh
-   ssh -N -L 1455:127.0.0.1:1455 user@your-truenas
+   ssh -N -L 1455:127.0.0.1:10708 user@your-truenas
    ```
 
 2. Keep the tunnel open and choose **Settings → AI & transcription → Continue with ChatGPT**.
-3. Complete sign-in in the opened browser tab. The callback to `127.0.0.1:1455` travels through the tunnel. The server owns the registration, refresh tokens, and stable host ID.
-4. Close the tunnel after sign-in succeeds. Compose exposes port 1455 only on the NAS loopback address. The listener is active only for a pending sign-in attempt.
+3. Complete sign-in in the opened browser tab. The callback to your computer's `127.0.0.1:1455` travels through SSH to the NAS app port 10708. The app relays `/auth/callback` to its private loopback listener, which validates the existing OAuth state and PKCE flow. The server owns the registration, refresh tokens, and stable host ID.
+4. Close the tunnel after sign-in succeeds. Port 1455 is never published on the NAS; its internal listener runs only during a pending sign-in. If you changed `WEB_PORT`, replace 10708 in the command with that port.
 
 This uses HiDockNotes' existing ChatGPT authorization flow, not Codex or ChatGPT browser-profile credentials. Alternative Gemini/OpenAI API connections remain available in Settings; they are separate from a ChatGPT plan.
 

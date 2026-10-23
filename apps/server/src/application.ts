@@ -43,12 +43,15 @@ import { tarFile } from '@hidock/core/services/backup-archive'
 import { LibraryAgentTools } from '@hidock/core/agents/library-tools'
 import { AGENT_TOOL_CATALOG } from '@hidock/core/agents/tool-catalog'
 import { registerAuth } from './auth'
+import { allowedOrigins } from './origins'
+import { registerChatGPTCallback } from './chatgpt-callback'
 import { digest, encryption, privateFile, secret, setupCode } from './security'
 import { registerUploads } from './uploads'
 import product from '../product.json'
 
-export interface ServerOptions { dataPath: string; backupPath: string; origin: string; webPath?: string; secretPath?: string; logger?: boolean; processing?: boolean; onRestore?: () => void; setupLog?: (message: string) => void }
+export interface ServerOptions { dataPath: string; backupPath: string; origin: string; additionalOrigins?: readonly string[]; webPath?: string; secretPath?: string; logger?: boolean; processing?: boolean; onRestore?: () => void; setupLog?: (message: string) => void }
 export async function createApplication(options: ServerOptions) {
+  allowedOrigins(options.origin, options.additionalOrigins)
   let maintenance = false
   const dataPath = resolve(options.dataPath), backupPath = resolve(options.backupPath)
   for (const path of [dataPath, backupPath, join(dataPath, 'data'), join(dataPath, 'recordings')]) mkdirSync(path, { recursive: true, mode: 0o700 })
@@ -64,7 +67,7 @@ export async function createApplication(options: ServerOptions) {
   if (needsOwner) { const message = 'HiDockNotes first-run setup. Read /data/secrets/setup-code in the container. Setup code: ' + readFileSync(setupFile, 'utf8'); if (options.setupLog) options.setupLog(message); else if (options.logger) app.log.info(message) }
   await app.register(cookie); await app.register(rateLimit, { global: false })
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) => done(null, body))
-  await registerAuth(app, { origin: options.origin, setupToken: readFileSync(setupFile, 'utf8'), secure: new URL(options.origin).protocol === 'https:' })
+  const sessionFor = await registerAuth(app, { origin: options.origin, additionalOrigins: options.additionalOrigins, setupToken: readFileSync(setupFile, 'utf8') })
   app.addHook('preHandler', async (request, reply) => { if (maintenance && request.url.startsWith('/api/')) return reply.code(503).send({ error: 'The server is restarting after restore.' }) })
   const clients = new Set<import('node:http').ServerResponse>()
   const publish = (event: string, value?: unknown): void => { for (const client of clients) client.write('event: ' + event + '\ndata: ' + JSON.stringify(value ?? null) + '\n\n') }
@@ -74,6 +77,7 @@ export async function createApplication(options: ServerOptions) {
   let authUrl: string | null = null
   const openBrowser = async (url: string): Promise<void> => { authUrl = url; publish('browser:open', url) }
   const chatgpt = new ChatGPTAuth({ store, appName: product.name, callbackPort: 1455, bindHost: process.env.CHATGPT_CALLBACK_BIND ?? '127.0.0.1', openBrowser, changed, signedIn: models => { updateAISettings({ chat: { provider: 'chatgpt', model: models[0].id } }); queue.enqueuePending(); queue.kick() }, sessionEnded: id => queue.invalidateChatGPTSession(id) })
+  registerChatGPTCallback(app, () => chatgpt.state().signingIn)
   const runner = new UtilityProcessingRunner(id => chatgpt.accessToken(id))
   const queue = new TranscriptionQueue({ vault, settings: readAISettings, dataPath, runner, changed, activity: emitActivityLog, reviewMode: db.queryOne<{ value: string }>("SELECT value FROM settings WHERE key='restore-review-required'")?.value === 'true', chatgpt })
   const search = new SemanticSearch({ dataPath, runner: new UtilityEmbeddingRunner(searchModelDirectory(dataPath)), changed: state => publish('semantic:state', state) })
@@ -110,7 +114,7 @@ export async function createApplication(options: ServerOptions) {
   app.get('/api/v1/chatgpt/authorization', async () => ({ url: authUrl }))
   app.get('/api/v1/events', async (request, reply) => {
     reply.hijack(); const stream = reply.raw; stream.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' }); clients.add(stream); stream.write('event: reconnected\ndata: null\n\n')
-    const timer = setInterval(() => { const token = request.cookies.hidock_session; if (!token || !db.queryOne('SELECT token_hash FROM server_sessions WHERE token_hash=? AND expires_at>?', [digest(token), Date.now()])) { stream.write('event: signed-out\ndata: null\n\n'); stream.end() } else stream.write(': heartbeat\n\n') }, 15000)
+    const timer = setInterval(() => { if (!sessionFor(request)) { stream.write('event: signed-out\ndata: null\n\n'); stream.end() } else stream.write(': heartbeat\n\n') }, 15000)
     stream.on('close', () => { clearInterval(timer); clients.delete(stream) })
   })
   app.get<{ Params: { id: string } }>('/api/v1/recordings/:id/audio', async (request, reply) => {

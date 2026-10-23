@@ -2,6 +2,12 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { root, assertVersion } = require('./version.cjs')
 const hostedManifests = ['apps/web/package.json', 'apps/web/product.json', 'apps/server/package.json', 'apps/server/product.json', 'packages/core/package.json']
+function deploymentVersion(name, source, version) {
+  assertVersion(version)
+  const pattern = name === 'compose.yaml' ? /(\$\{HIDOCKNOTES_VERSION:-)([^}\s]+)(\})/ : name === '.env.example' ? /^(HIDOCKNOTES_VERSION=)([^\r\n]+)()/m : null
+  if (!pattern || !pattern.test(source)) throw new Error(`${name} is missing its pinned deployment version.`)
+  return source.replace(pattern, (_match, prefix, _previous, suffix) => prefix + version + suffix)
+}
 function checkHosted(directory = root, update = false) {
   const version = assertVersion(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version)
   const lockFile = path.join(directory, 'package-lock.json'), lock = JSON.parse(fs.readFileSync(lockFile))
@@ -9,6 +15,11 @@ function checkHosted(directory = root, update = false) {
     const file = path.join(directory, name), value = JSON.parse(fs.readFileSync(file))
     if (update) { value.version = version; fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n'); if (name.endsWith('package.json')) lock.packages[path.dirname(name)].version = version }
     else if (value.version !== version || name.endsWith('package.json') && lock.packages[path.dirname(name)]?.version !== version) throw new Error(`${name} must match version ${version}. Run npm run release:version -- ${version}.`)
+  }
+  for (const name of ['compose.yaml', '.env.example']) {
+    const file = path.join(directory, name), source = fs.readFileSync(file, 'utf8'), expected = deploymentVersion(name, source, version)
+    if (update) fs.writeFileSync(file, expected)
+    else if (source !== expected) throw new Error(`${name} must use version ${version}. Run npm run release:version -- ${version}.`)
   }
   if (update) fs.writeFileSync(lockFile, JSON.stringify(lock, null, 2) + '\n')
   return version
@@ -24,4 +35,4 @@ if (require.main === module) {
     else console.log('Hosted version ' + checkHosted(root, process.argv.includes('--update')))
   } catch (error) { console.error(error.message); process.exitCode = 1 }
 }
-module.exports = { checkHosted, imageMetadata }
+module.exports = { checkHosted, imageMetadata, deploymentVersion }
