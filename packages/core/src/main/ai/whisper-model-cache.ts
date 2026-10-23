@@ -25,6 +25,16 @@ export function validateWhisperArchive(entries: string[], root: string): void {
 }
 async function valid(path: string, hash: string): Promise<boolean> { try { return await sha256File(path) === hash } catch { return false } }
 
+/** Translate local setup failures without persisting URLs, credentials or subprocess output. */
+export function whisperPreparationError(error: unknown): ProcessingError {
+  if (error instanceof ProcessingError) return error
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  if (['EACCES', 'EPERM', 'EROFS'].includes(code)) return new ProcessingError('The app cannot write its local Whisper models. Give the app user write access to the model dataset and retry.')
+  if (['ENOSPC', 'EDQUOT'].includes(code)) return new ProcessingError('There is not enough disk space for the local Whisper model. Free space on the model dataset and retry.')
+  if (code === 'ENOENT' || error && typeof error === 'object' && 'stderr' in error && String(error.stderr).includes('bzip2')) return new ProcessingError('The local Whisper archive tool is unavailable. Update the server image, or install the system tar/bzip2 tools, then retry.')
+  return new ProcessingError('The local Whisper model could not be prepared. Check the server connection to GitHub and available model storage, then retry.', true)
+}
+
 export class WhisperModelCache {
   constructor(private readonly folder: string, private readonly request: typeof fetch = fetch) {}
   async ensure(model: WhisperModelId, progress: (message: string) => void, signal?: AbortSignal): Promise<WhisperModelFiles> {
@@ -32,6 +42,7 @@ export class WhisperModelCache {
     const files = { encoder: join(destination, 'encoder.int8.onnx'), decoder: join(destination, 'decoder.int8.onnx'), tokens: join(destination, 'tokens.txt') }
     signal?.throwIfAborted()
     if (await valid(files.encoder, asset.encoder) && await valid(files.decoder, asset.decoder) && await valid(files.tokens, TOKENS_HASH)) return files
+    try {
     await mkdir(destination, { recursive: true })
     const staging = join(destination, 'download-' + randomUUID()), archive = join(staging, 'model.tar.bz2'), root = 'sherpa-onnx-whisper-' + asset.name
     await mkdir(staging)
@@ -63,5 +74,6 @@ export class WhisperModelCache {
       if (!(await readFile(files.tokens, 'utf8')).trim()) throw new ProcessingError('The local Whisper vocabulary is empty.')
       return files
     } finally { if (resolve(staging).startsWith(resolve(destination) + sep)) await rm(staging, { recursive: true, force: true }) }
+    } catch (error) { if (signal?.aborted) throw error; throw whisperPreparationError(error) }
   }
 }
