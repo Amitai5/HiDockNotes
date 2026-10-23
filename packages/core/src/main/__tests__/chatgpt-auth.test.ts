@@ -62,6 +62,53 @@ describe('browser subscription session lifecycle', () => {
     return status
   }
   async function connect(): Promise<string> { await auth.startSignIn(); expect(await callback()).toBe(200); return auth.state().activeProfileId! }
+  function callbackUrl(fields: Record<string, string> = {}): string {
+    const value = new URL(opened.searchParams.get('redirect_uri')!)
+    value.search = new URLSearchParams({ state: opened.searchParams.get('state')!, code: 'authorization-code', client_id: 'oaiapp_one', ...fields }).toString()
+    return value.toString()
+  }
+  it('completes a pasted remote callback using the original PKCE verifier and saves only encrypted credentials', async () => {
+    await auth.startSignIn()
+    await auth.completeCallback('  ' + callbackUrl() + '  ')
+    expect(auth.state()).toMatchObject({ connected: true, planEnabled: true, signingIn: false })
+    expect(JSON.stringify(auth.state())).not.toContain('secret')
+    expect(server.closed).toBe(true)
+    expect(signedIn).toHaveBeenCalledTimes(1)
+  })
+  it('requires a pending attempt before accepting a pasted callback', async () => {
+    await expect(auth.completeCallback('http://127.0.0.1:1455/auth/callback?code=example')).rejects.toThrow('Start a new ChatGPT sign-in')
+    expect(request).not.toHaveBeenCalled()
+  })
+  it.each([undefined, '', '/auth/callback?code=example', 'http://untrusted.test:1455/auth/callback', 'http://localhost:1455/auth/callback', 'https://127.0.0.1:1455/auth/callback', 'http://127.0.0.1:1456/auth/callback', 'http://127.0.0.1:1455/another', 'http://user:pass@127.0.0.1:1455/auth/callback', 'http://127.0.0.1:1455/auth/callback#secret', 'x'.repeat(20001)])('rejects pasted values outside the pending loopback callback: %#', async value => {
+    await auth.startSignIn()
+    await expect(auth.completeCallback(value)).rejects.toThrow()
+    expect(request).not.toHaveBeenCalled()
+    expect(auth.state().signingIn).toBe(true)
+  })
+  it('preserves the pending attempt after a pasted wrong state and accepts the matching callback', async () => {
+    await auth.startSignIn()
+    await expect(auth.completeCallback(callbackUrl({ state: 'wrong' }))).rejects.toThrow('did not match')
+    expect(auth.state().signingIn).toBe(true); expect(request).not.toHaveBeenCalled()
+    await auth.completeCallback(callbackUrl())
+    expect(auth.state().connected).toBe(true)
+  })
+  it('handles declined consent in a pasted callback without exchanging a code', async () => {
+    await auth.startSignIn()
+    await expect(auth.completeCallback(callbackUrl({ error: 'access_denied' }))).rejects.toThrow('not authorized')
+    expect(request).not.toHaveBeenCalled(); expect(auth.state().signingIn).toBe(false)
+  })
+  it('exchanges the callback only once when pasted submission and the listener overlap', async () => {
+    await auth.startSignIn()
+    let release: () => void = () => undefined
+    const gate = new Promise<void>(resolve => { release = resolve }), original = request.getMockImplementation()!
+    request.mockImplementation(async (url, options) => { if (url === CHATGPT_TOKEN_ENDPOINT) await gate; return original(url, options) })
+    const completing = auth.completeCallback(callbackUrl())
+    await expect(auth.completeCallback(callbackUrl())).rejects.toThrow('already been handled')
+    expect(await callback()).toBe(409)
+    release(); await completing
+    expect(request.mock.calls.filter(([url]) => url === CHATGPT_TOKEN_ENDPOINT)).toHaveLength(1)
+    await expect(auth.completeCallback(callbackUrl())).rejects.toThrow('Start a new ChatGPT sign-in')
+  })
   it('connects only after valid browser authorization and returns no tokens to UI state', async () => {
     await auth.startSignIn()
     expect(auth.state().signingIn).toBe(true)

@@ -24,8 +24,13 @@ async function main() {
         assert.match(cookie,/hidock_local_session=/); assert.doesNotMatch(cookie,/; Secure/i); assert.match(cookie,/HttpOnly/);
         const headers = { origin, cookie:cookie.split(';')[0], 'x-csrf-token':session.csrf, 'content-type':'application/json' };
         const command = (operation,args=[]) => fetch(base+'/api/v1/rpc/'+operation,{method:'POST',headers,body:JSON.stringify({args})});
+        const complete = (url,requestHeaders=headers) => fetch(base+'/api/v1/chatgpt/callback',{method:'POST',headers:requestHeaders,body:JSON.stringify({url})});
+        assert.equal((await complete('http://127.0.0.1:1455/auth/callback?code=unused&state=unused',{origin,'content-type':'application/json'})).status,401);
         assert.equal((await fetch(base+'/auth/callback?code=unused&state=unused')).status,404);
         assert.equal((await command('chatgpt:sign-in',[null])).status,200);
+        assert.equal((await complete('http://127.0.0.1:1455/auth/callback?code=unused&state=wrong')).status,400);
+        assert.equal((await complete('http://untrusted.test/auth/callback?code=unused&state=unused')).status,400);
+        assert.equal((await complete('http://127.0.0.1:1455/auth/callback?code=unused&state=unused',{...headers,'x-csrf-token':'wrong'})).status,403);
         const callback = await fetch(base+'/auth/callback?code=unused&state=wrong');
         assert.equal(callback.status,400); assert.equal(callback.headers.get('cache-control'),'no-store');
         assert.equal((await (await command('ai:state')).json()).result.chatgpt.signingIn,true);
@@ -39,7 +44,7 @@ async function main() {
       }
       verify().catch(error=>{console.error(error);process.exitCode=1});
     `)
-    console.log('Container UID 568, port 10708, image healthcheck, website, PWA, local HTTP setup, secure public login, rejected origins and OAuth callback relay passed.')
+    console.log('Container UID 568, port 10708, healthcheck, website, local/public login, rejected origins, callback relay and authenticated callback completion boundaries passed.')
   } catch (error) { console.error(docker('logs',name)); throw error }
   finally { try { docker('rm','-f',name) } catch { /* Never remove unrelated containers. */ } }
 }

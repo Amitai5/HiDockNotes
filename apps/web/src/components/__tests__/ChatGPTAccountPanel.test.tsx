@@ -11,17 +11,19 @@ import type { AppClient } from '../../shared/contracts'
 
 describe('subscription settings and consent UI', () => {
   let state: AIState
-  const signIn = vi.fn(), acknowledgeWelcome = vi.fn(), manageUsage = vi.fn(), resume = vi.fn(), select = vi.fn(), remove = vi.fn()
+  const signIn = vi.fn(), completeCallback = vi.fn(), cancelSignIn = vi.fn(), acknowledgeWelcome = vi.fn(), manageUsage = vi.fn(), resume = vi.fn(), select = vi.fn(), remove = vi.fn()
   beforeEach(() => {
     const chatgpt: ChatGPTState = { profiles: [], activeProfileId: null, connected: false, planEnabled: false, signingIn: false, error: null, welcomePending: false, models: DEFAULT_CHATGPT_MODELS, offline: true, usageBlocked: false }
     state = { settings: structuredClone(DEFAULT_AI_SETTINGS), providers: (['gemini', 'openai'] as const).map(provider => ({ provider, configured: false, verified: false, verifiedAt: null, models: DEFAULT_MODELS[provider], offline: true })), ready: false, reason: 'Verify Gemini.', chatgpt }
     signIn.mockReset().mockImplementation(async () => { state.chatgpt!.signingIn = true; return structuredClone(state) })
+    completeCallback.mockReset().mockImplementation(async () => { state.chatgpt = { ...state.chatgpt!, signingIn: false, connected: true, planEnabled: true }; return structuredClone(state) })
+    cancelSignIn.mockReset().mockImplementation(async () => { state.chatgpt!.signingIn = false; return structuredClone(state) })
     acknowledgeWelcome.mockReset().mockImplementation(async () => { state.chatgpt!.welcomePending = false; return structuredClone(state) })
     manageUsage.mockReset().mockResolvedValue(undefined)
     resume.mockReset().mockImplementation(async () => { state.chatgpt!.usageBlocked = false; state.chatgpt!.error = null; return structuredClone(state) })
     select.mockReset().mockImplementation(async (id: string) => { state.chatgpt!.activeProfileId = id; return structuredClone(state) })
     remove.mockReset().mockImplementation(async (id: string) => { state.chatgpt!.profiles = state.chatgpt!.profiles.filter(profile => profile.id !== id); if (state.chatgpt!.activeProfileId === id) state.chatgpt!.activeProfileId = state.chatgpt!.profiles[0]?.id ?? null; return { state: structuredClone(state), message: null } })
-    setAppClient({ ai: { getState: vi.fn(async () => structuredClone(state)), chatgpt: { signIn, acknowledgeWelcome, manageUsage, resume, select, remove } } } as unknown as AppClient)
+    setAppClient({ ai: { getState: vi.fn(async () => structuredClone(state)), chatgpt: { signIn, completeCallback, cancelSignIn, acknowledgeWelcome, manageUsage, resume, select, remove } } } as unknown as AppClient)
   })
   afterEach(cleanup)
   function Harness(): JSX.Element { const [value, setValue] = useState(state); return <ChatGPTAccountPanel state={value} accept={setValue} /> }
@@ -31,6 +33,37 @@ describe('subscription settings and consent UI', () => {
     await screen.findByText('Complete sign-in in your browser…')
     expect(signIn).toHaveBeenCalledWith(null)
     expect(screen.queryByLabelText('ChatGPT API key')).toBeNull()
+    expect(screen.getByText(/No SSH tunnel is needed/)).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Finish connection' })).toBeDisabled()
+  })
+  it('finishes remote sign-in with the pasted callback and clears the sensitive field', async () => {
+    render(<Harness />)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }))
+    const field = await screen.findByLabelText('Callback URL')
+    expect(field).toHaveAttribute('type', 'password')
+    fireEvent.change(field, { target: { value: '  http://127.0.0.1:1455/auth/callback?code=example&state=example  ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Finish connection' }))
+    await screen.findByText('Connected')
+    expect(completeCallback).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:1455/auth/callback?code=example&state=example')
+    expect(screen.queryByLabelText('Callback URL')).toBeNull()
+    expect(screen.queryByText(/SSH tunnel from this computer/)).toBeNull()
+  })
+  it('keeps the pending form available after a rejected callback', async () => {
+    completeCallback.mockRejectedValueOnce(new Error('The sign-in callback did not match this attempt.'))
+    state.chatgpt!.signingIn = true; render(<Harness />)
+    fireEvent.change(screen.getByLabelText('Callback URL'), { target: { value: 'http://127.0.0.1:1455/auth/callback?code=example&state=wrong' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Finish connection' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('did not match this attempt')
+    expect(screen.getByRole('button', { name: 'Finish connection' })).toBeEnabled()
+    expect(screen.getByLabelText('Callback URL')).toBeVisible()
+  })
+  it('discards the callback when sign-in is cancelled', async () => {
+    state.chatgpt!.signingIn = true; render(<Harness />)
+    fireEvent.change(screen.getByLabelText('Callback URL'), { target: { value: 'private callback' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel sign-in' }))
+    await waitFor(() => expect(screen.queryByLabelText('Callback URL')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with ChatGPT' }))
+    expect(await screen.findByLabelText('Callback URL')).toHaveValue('')
   })
   it('offers the subscription for chat only and keeps local and API transcription choices visible', async () => {
     render(<AISettingsPanel />)

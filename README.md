@@ -44,7 +44,9 @@ Compose publishes only port **10708**. A Cloudflare Tunnel connector using the N
 
 In Chrome or Edge, choose **Install** in the app header or browser menu for a standalone PWA window. Direct HiDock USB needs HTTPS and an open tab/PWA window. Other browsers can use the library and upload audio. The server needs no USB passthrough.
 
-See the [self-hosting guide](docs/self-hosting.md) for dataset permissions, resource limits, ChatGPT sign-in through an SSH tunnel, desktop backup migration, restore, MCP, updates and the physical USB validation gate. Releases include a PWA archive, Compose configuration and the exact GHCR image digest alongside the platform installers.
+To connect ChatGPT from the website, authorize the app, copy the full returned `127.0.0.1` callback URL from the sign-in tab, and paste it into **Callback URL → Finish connection**. No local listener or SSH tunnel is required.
+
+See the [self-hosting guide](docs/self-hosting.md) for dataset permissions, resource limits, ChatGPT connection setup, desktop backup migration, restore, MCP, updates and the physical USB validation gate. Releases include a PWA archive, Compose configuration and the exact GHCR image digest alongside the platform installers.
 
 ## Desktop installers
 

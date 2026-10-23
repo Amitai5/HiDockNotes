@@ -524,6 +524,10 @@ textarea { -webkit-app-region:no-drag; resize:vertical; border:1px solid var(--b
 .chatgpt-card>small { display:block; margin-top:8px; color:var(--muted); line-height:1.65; }
 .chatgpt-account-picker { display:flex; flex-direction:column; gap:7px; max-width:530px; margin-top:18px; font-size:12px; color:var(--muted); }
 .chatgpt-actions { margin-top:18px; gap:10px; flex-wrap:wrap; align-items:center; }
+.chatgpt-card .chatgpt-callback { display:grid; gap:10px; margin-top:18px; max-width:680px; }
+.chatgpt-callback p { line-height:1.6; }
+.chatgpt-callback label { color:var(--muted); }
+.chatgpt-callback .button { justify-self:start; }
 .chatgpt-sign-in { background:#111; border-color:#111; color:#fff; padding:10px 17px; }
 .chatgpt-sign-in:hover:not(:disabled) { background:#303030; border-color:#303030; }
 .chatgpt-plan-label { display:block; margin:10px 0; color:var(--muted); font-size:12px; }

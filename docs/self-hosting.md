@@ -77,17 +77,22 @@ Live capture sends sequenced stereo PCM frames to the server and saves a WAV. An
 
 Local Whisper transcription and speaker processing run on the server CPU. Models download to `/data/models` when needed. Optional semantic search is off until you choose **Download & enable** in Settings. API keys, ChatGPT tokens and private calendar links are encrypted with `/data/secrets/server.key`.
 
-To keep using your ChatGPT plan with its loopback callback:
+To connect your ChatGPT plan from the website:
 
-1. On the computer where you will sign in, open a tunnel to TrueNAS:
+1. Choose **Settings → AI & transcription → Continue with ChatGPT** (or **Add account**).
+2. Authorize HiDockNotes in the opened tab. OpenAI returns to `http://127.0.0.1:1455/auth/callback` on the computer running your browser. Without a local listener, that tab shows a connection error; copy its **full address** from the address bar.
+3. Return to HiDockNotes, paste the address into **Callback URL**, and choose **Finish connection**.
+4. HiDockNotes validates the pending state, PKCE and signed identity, then saves the credentials encrypted on your server. The field clears after completion or cancellation. Callbacks expire after ten minutes and cannot be reused.
 
-   ```sh
-   ssh -N -L 1455:127.0.0.1:10708 user@your-truenas
-   ```
+This works through the main app port over Cloudflare Tunnel or your configured local origin. No SSH tunnel or additional published port is required. The documented OpenAI plan-sign-in flow requires an HTTP `127.0.0.1` callback; replacing it with your public HTTPS address is not supported by this registration flow. See [OpenAI's registration and sign-in documentation](https://developers.openai.com/siwc/token-sharing-open-source/sign-in).
 
-2. Keep the tunnel open and choose **Settings → AI & transcription → Continue with ChatGPT**.
-3. Complete sign-in in the opened browser tab. The callback to your computer's `127.0.0.1:1455` travels through SSH to the NAS app port 10708. The app relays `/auth/callback` to its private loopback listener, which validates the existing OAuth state and PKCE flow. The server owns the registration, refresh tokens, and stable host ID.
-4. Close the tunnel after sign-in succeeds. Port 1455 is never published on the NAS; its internal listener runs only during a pending sign-in. If you changed `WEB_PORT`, replace 10708 in the command with that port.
+If you prefer the callback to finish automatically, you can instead open this SSH forward on the browser computer **before** signing in, then close it afterward:
+
+```sh
+ssh -N -L 1455:127.0.0.1:10708 user@your-truenas
+```
+
+The optional forward sends your computer's loopback callback to the NAS app port, which relays it to the private listener. Port 1455 is never published on the NAS. If you changed `WEB_PORT`, replace 10708 in the command with that port.
 
 This uses HiDockNotes' existing ChatGPT authorization flow, not Codex or ChatGPT browser-profile credentials. Alternative Gemini/OpenAI API connections remain available in Settings; they are separate from a ChatGPT plan.
 

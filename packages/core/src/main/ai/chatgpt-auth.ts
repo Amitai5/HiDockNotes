@@ -60,26 +60,27 @@ export class ChatGPTAuth {
       try { url = new URL(request.url ?? '', attempt.redirectUri) } catch { response.writeHead(400); response.end('Invalid callback.'); return }
       if (request.method !== 'GET' || url.origin !== new URL(attempt.redirectUri).origin || url.pathname !== '/auth/callback' || request.headers.host !== new URL(attempt.redirectUri).host || (request.url?.length ?? 0) > 20000) { response.writeHead(404); response.end('Not found.'); return }
       if (pending.consumed) { response.writeHead(409); response.end('This sign-in has already been handled.'); return }
-      let result: { code: string; clientId: string }
-      try { result = callbackResult(url, attempt) }
-      catch (error) {
-        response.writeHead(400); response.end('Sign-in could not be completed. Return to HiDockNotes and try again.')
-        // Unrelated requests cannot cancel the user's genuine pending login.
-        if (sameSecret(url.searchParams.get('state') ?? '', attempt.state)) { this.error = safeProcessingError(error).message; this.finish(pending) }
-        return
-      }
-      pending.consumed = true
-      void this.completeSignIn(result, pending).then(() => {
+      void this.acceptCallback(url, pending).then(() => {
         response.writeHead(200); response.end('<!doctype html><title>HiDockNotes</title><h1>ChatGPT is connected</h1><p>You can close this tab and return to HiDockNotes.</p>')
-      }).catch(error => {
-        if (this.pending === pending && !cancellation.signal.aborted) this.error = safeProcessingError(error).message
+      }).catch(() => {
         response.writeHead(400); response.end('<!doctype html><title>HiDockNotes</title><h1>Sign-in could not complete</h1><p>Return to HiDockNotes to see the result and try again.</p>')
-      }).finally(() => this.finish(pending))
+      })
     })
     server.on('error', () => { if (this.pending === pending) { this.error = 'The local ChatGPT sign-in listener stopped. Try signing in again.'; this.finish(pending) } })
     this.dependencies.changed()
     try { await this.dependencies.openBrowser(authorizationUrl(attempt)) }
     catch { this.error = 'The sign-in browser could not open. Start a new sign-in in Settings.'; this.finish(pending); throw new ProcessingError(this.error) }
+  }
+  /** Finish a remote browser's callback with the same validation and one-use exchange as the loopback listener. */
+  async completeCallback(value: unknown): Promise<void> {
+    const pending = this.pending
+    if (!pending) throw new ProcessingError('Start a new ChatGPT sign-in before submitting its callback URL.')
+    if (typeof value !== 'string' || value.length > 20000) throw new ProcessingError('Paste the full callback URL from the sign-in tab.')
+    let url: URL
+    try { url = new URL(value.trim()) } catch { throw new ProcessingError('Paste the full callback URL from the sign-in tab.') }
+    const expected = new URL(pending.attempt.redirectUri)
+    if (url.origin !== expected.origin || url.pathname !== expected.pathname || url.username || url.password || url.hash) throw new ProcessingError('Use the full 127.0.0.1 callback URL from the current ChatGPT sign-in tab.')
+    await this.acceptCallback(url, pending)
   }
   cancelSignIn(): void { const pending = this.pending; if (pending) { pending.cancellation.abort(); this.finish(pending) } }
   select(id: string): void { this.cancelSignIn(); const previous = this.dependencies.store.activeId(); this.dependencies.store.select(id); if (previous && previous !== id) this.endSession(previous); this.error = null; this.dependencies.changed() }
@@ -162,6 +163,20 @@ export class ChatGPTAuth {
     for (const controller of this.sessionControllers.values()) controller.abort()
     for (const id of this.signingOut) { this.dependencies.store.clearTokens(id); this.dependencies.store.saveLogoutWarning(id, REVOCATION_WARNING) }
     this.shutdown.abort(); this.cancelSignIn()
+  }
+  private async acceptCallback(url: URL, pending: PendingLogin): Promise<void> {
+    if (this.pending !== pending || pending.consumed) throw new ProcessingError('This sign-in has already been handled. Start a new sign-in.')
+    let result: { code: string; clientId: string }
+    try { result = callbackResult(url, pending.attempt) }
+    catch (error) {
+      // An unrelated callback must not cancel the owner's genuine pending login.
+      if (sameSecret(url.searchParams.get('state') ?? '', pending.attempt.state)) { this.error = safeProcessingError(error).message; this.finish(pending) }
+      throw error
+    }
+    pending.consumed = true
+    try { await this.completeSignIn(result, pending) }
+    catch (error) { if (this.pending === pending && !pending.cancellation.signal.aborted) this.error = safeProcessingError(error).message; throw error }
+    finally { this.finish(pending) }
   }
   private async completeSignIn(result: { code: string; clientId: string }, pending: PendingLogin): Promise<void> {
     const value = await this.jsonRequest(CHATGPT_TOKEN_ENDPOINT, { method: 'POST', body: new URLSearchParams({ grant_type: 'authorization_code', client_id: result.clientId, code: result.code, code_verifier: pending.attempt.verifier, redirect_uri: pending.attempt.redirectUri, resource: CHATGPT_RESOURCE }), signal: pending.cancellation.signal })

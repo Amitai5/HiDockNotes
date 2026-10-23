@@ -49,7 +49,7 @@ import { digest, encryption, privateFile, secret, setupCode } from './security'
 import { registerUploads } from './uploads'
 import product from '../product.json'
 
-export interface ServerOptions { dataPath: string; backupPath: string; origin: string; additionalOrigins?: readonly string[]; webPath?: string; secretPath?: string; logger?: boolean; processing?: boolean; onRestore?: () => void; setupLog?: (message: string) => void }
+export interface ServerOptions { dataPath: string; backupPath: string; origin: string; additionalOrigins?: readonly string[]; webPath?: string; secretPath?: string; logger?: boolean; processing?: boolean; onRestore?: () => void; setupLog?: (message: string) => void; chatgpt?: { request?: typeof fetch; callbackPort?: number } }
 export async function createApplication(options: ServerOptions) {
   allowedOrigins(options.origin, options.additionalOrigins)
   let maintenance = false
@@ -64,6 +64,8 @@ export async function createApplication(options: ServerOptions) {
   if (!existsSync(setupFile)) writeFileSync(setupFile, setupCode(), { mode: 0o600, flag: 'wx' })
   else if (needsOwner && !/^[A-HJ-NP-Z2-9]{8}$/.test(readFileSync(setupFile, 'utf8'))) writeFileSync(setupFile, setupCode(), { mode: 0o600 })
   const app = Fastify({ logger: options.logger ? { redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers.set-cookie'], serializers: { req: request => ({ method: request.method, url: request.url.split('?')[0] }) } } : false, bodyLimit: 1024 * 1024, requestTimeout: 120000, trustProxy: false })
+  // Install before plugin boot snapshots the route contexts, including when static files are served.
+  app.setErrorHandler((error, request, reply) => { app.log.error({ err: error, route: request.routeOptions.url }, 'Request failed'); const code = (error as { statusCode?: number }).statusCode; const status = code && code < 500 ? code : 400; return reply.code(status).send({ error: error instanceof Error ? error.message.slice(0, 500) : 'The request could not be completed.' }) })
   if (needsOwner) { const message = 'HiDockNotes first-run setup. Read /data/secrets/setup-code in the container. Setup code: ' + readFileSync(setupFile, 'utf8'); if (options.setupLog) options.setupLog(message); else if (options.logger) app.log.info(message) }
   await app.register(cookie); await app.register(rateLimit, { global: false })
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) => done(null, body))
@@ -76,7 +78,7 @@ export async function createApplication(options: ServerOptions) {
   const vault = new CredentialVault(cipher), store = new ChatGPTStore(cipher)
   let authUrl: string | null = null
   const openBrowser = async (url: string): Promise<void> => { authUrl = url; publish('browser:open', url) }
-  const chatgpt = new ChatGPTAuth({ store, appName: product.name, callbackPort: 1455, bindHost: process.env.CHATGPT_CALLBACK_BIND ?? '127.0.0.1', openBrowser, changed, signedIn: models => { updateAISettings({ chat: { provider: 'chatgpt', model: models[0].id } }); queue.enqueuePending(); queue.kick() }, sessionEnded: id => queue.invalidateChatGPTSession(id) })
+  const chatgpt = new ChatGPTAuth({ store, appName: product.name, callbackPort: options.chatgpt?.callbackPort ?? 1455, bindHost: process.env.CHATGPT_CALLBACK_BIND ?? '127.0.0.1', request: options.chatgpt?.request, openBrowser, changed, signedIn: models => { updateAISettings({ chat: { provider: 'chatgpt', model: models[0].id } }); queue.enqueuePending(); queue.kick() }, sessionEnded: id => queue.invalidateChatGPTSession(id) })
   registerChatGPTCallback(app, () => chatgpt.state().signingIn)
   const runner = new UtilityProcessingRunner(id => chatgpt.accessToken(id))
   const queue = new TranscriptionQueue({ vault, settings: readAISettings, dataPath, runner, changed, activity: emitActivityLog, reviewMode: db.queryOne<{ value: string }>("SELECT value FROM settings WHERE key='restore-review-required'")?.value === 'true', chatgpt })
@@ -112,6 +114,7 @@ export async function createApplication(options: ServerOptions) {
   app.get('/healthz', async () => ({ status: maintenance ? 'maintenance' : 'ok', version: product.version }))
   app.post<{ Params: { operation: string }; Body: { args: unknown[] } }>('/api/v1/rpc/:operation', async (request, reply) => { if (maintenance) return reply.code(503).send({ error: 'The library is restarting after restore.' }); if (!Array.isArray(request.body?.args) || request.body.args.length > 8) throw new Error('Invalid operation arguments.'); return { result: await invoke(request.params.operation, request.body.args) ?? null } })
   app.get('/api/v1/chatgpt/authorization', async () => ({ url: authUrl }))
+  app.post<{ Body: { url: unknown } }>('/api/v1/chatgpt/callback', { bodyLimit: 24 * 1024, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async request => { await chatgpt.completeCallback(request.body?.url); return { result: queue.state() } })
   app.get('/api/v1/events', async (request, reply) => {
     reply.hijack(); const stream = reply.raw; stream.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' }); clients.add(stream); stream.write('event: reconnected\ndata: null\n\n')
     const timer = setInterval(() => { if (!sessionFor(request)) { stream.write('event: signed-out\ndata: null\n\n'); stream.end() } else stream.write(': heartbeat\n\n') }, 15000)
@@ -149,7 +152,6 @@ export async function createApplication(options: ServerOptions) {
     try { const result = value.method === 'initialize' ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: product.name, version: product.version } } : value.method === 'ping' ? {} : value.method === 'tools/list' ? { tools: AGENT_TOOL_CATALOG.map(tool => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false } })) } : value.method === 'tools/call' ? { content: [{ type: 'text', text: JSON.stringify(await agentTools.call(value.params?.name ?? '', value.params?.arguments)) }] } : null; return result === null ? { jsonrpc: '2.0', id: value.id, error: { code: -32601, message: 'Method not found.' } } : { jsonrpc: '2.0', id: value.id, result } } catch { return { jsonrpc: '2.0', id: value.id, error: { code: -32602, message: 'Invalid tool arguments or unavailable data.' } } }
   })
   if (options.webPath && existsSync(options.webPath)) { await app.register(staticFiles, { root: resolve(options.webPath), cacheControl: false }); app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/') || request.url.includes('.')) return reply.code(404).send({ error: 'Not found.' }); return reply.sendFile('index.html') }) }
-  app.setErrorHandler((error, request, reply) => { app.log.error({ err: error, route: request.routeOptions.url }, 'Request failed'); const code = (error as { statusCode?: number }).statusCode; const status = code && code < 500 ? code : 400; return reply.code(status).send({ error: error instanceof Error ? error.message.slice(0, 500) : 'The request could not be completed.' }) })
   if (options.processing !== false) { queue.start(); calendar.start(); await search.initialize() }
   const interval = setInterval(() => { if (!maintenance && !backups.busy) void backup().catch(() => emitActivityLog('error', 'Scheduled library backup failed.')) }, 24 * 3600000); interval.unref()
   app.addHook('preClose', async () => { for (const client of clients) client.end(); for (const playing of media.values()) for (const stream of playing) stream.destroy(); chatgpt.close(); await Promise.allSettled([conversations.stop(), queue.stop(), calendar.stop(), search.stop(), backups.stop()]) })
