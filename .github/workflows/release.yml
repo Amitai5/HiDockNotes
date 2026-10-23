@@ -321,6 +321,10 @@ jobs:
           package-manager-cache: false
       - name: Test stable image promotion
         run: node --test scripts/release/latest-image.test.cjs
+      - name: Test TrueNAS automatic updater
+        run: |
+          python3 -m unittest discover -s scripts/deployment -p 'test_*.py' -v
+          python3 scripts/deployment/truenas_auto_update.py --help
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
