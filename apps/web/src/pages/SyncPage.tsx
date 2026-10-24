@@ -1,3 +1,4 @@
+import { usbAvailability } from '../services/browser-device'
 import { BrowserSyncTools } from '../components/BrowserSyncTools'
 import { appClient } from '../services/app-client'
 import { useEffect, useMemo, useState } from 'react'
@@ -30,10 +31,11 @@ export function SyncPage({ device }: { device: UseDevicePipelineResult }): JSX.E
     const remove = appClient.devicePipeline.onDownloads(s => setDownloads(s.queue))
     return () => { mounted = false; remove() }
   }, [])
+  const unavailable = usbAvailability()
   const progress = state.downloadProgress
   return <div className="page sync-page"><BrowserSyncTools />
-    <div className="page-heading"><div><h1>Device sync</h1><p>Sync from this browser to your server.</p></div><Button variant={connected ? 'secondary' : 'primary'} busy={pending === 'connect'} onClick={() => { void perform('connect', connected ? device.disconnect : device.connect) }}><Cable size={16} />{connected ? 'Disconnect' : 'Connect device'}</Button></div>
-    <div className={`device-banner ${connected ? 'is-connected' : ''}`}><div className="device-banner-icon"><Smartphone size={27} /></div><div><h2>{connected ? `${modelName(state.device?.model)} is connected` : state.phase === 'connecting' ? 'Connecting to your recorder' : 'No device connected'}</h2><p>{state.error || (connected ? busy ? `Device is ${state.phase}. Your files stay safe on the recorder.` : `${files.length} recording${files.length === 1 ? '' : 's'} on your device · ${newFiles.length} ready to download` : 'Connect your P1 with a USB cable to see your recordings.')}</p></div>{!connected && <Button disabled={busy} onClick={() => { void perform('connect', device.connect) }}>{busy ? 'Connecting…' : 'Connect'}</Button>}{connected && <span className="connection-badge"><span />Connected</span>}</div>
+    <div className="page-heading"><div><h1>Device sync</h1><p>Sync from this browser to your server.</p></div><Button variant={connected ? 'secondary' : 'primary'} busy={pending === 'connect'} disabled={!connected && !!unavailable} onClick={() => { void perform('connect', connected ? device.disconnect : device.connect) }}><Cable size={16} />{connected ? 'Disconnect' : 'Connect device'}</Button></div>
+    <div className={`device-banner ${connected ? 'is-connected' : ''}`}><div className="device-banner-icon"><Smartphone size={27} /></div><div><h2>{connected ? `${modelName(state.device?.model)} is connected` : state.phase === 'connecting' ? 'Connecting to your recorder' : 'No device connected'}</h2><p>{state.error || (connected ? busy ? `Device is ${state.phase}. Your files stay safe on the recorder.` : `${files.length} recording${files.length === 1 ? '' : 's'} on your device · ${newFiles.length} ready to download` : 'Connect your P1 with a USB cable to see your recordings.')}</p></div>{!connected && <Button disabled={busy || !!unavailable} onClick={() => { void perform('connect', device.connect) }}>{busy ? 'Connecting…' : 'Connect'}</Button>}{connected && <span className="connection-badge"><span />Connected</span>}</div>
     <div className="device-facts">
       <div><span><Smartphone size={15} />Model</span><strong>{state.device ? modelName(state.device.model) : '—'}</strong></div>
       <div><span>Firmware</span><strong>{state.device?.firmwareVersion ?? '—'}</strong><small>Updates disabled</small></div>

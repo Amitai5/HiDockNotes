@@ -5,10 +5,13 @@ import type { PipelineState } from '../shared/device-pipeline'
 import { clientEvents, invoke, request } from './http'
 import { hashBlob } from './hash'
 import { uploadAudio } from './upload'
+import { desktopBridge, DesktopRecorder, type RecorderTransport } from './desktop-recorder'
+import { browserStorageAvailability } from './browser-storage'
 
-export function usbAvailability(): string | null { return !window.isSecureContext ? 'Device sync needs HTTPS. Open the secure server address.' : !navigator.usb ? 'Use desktop Chrome or Edge for USB sync. You can upload audio in this browser.' : !navigator.locks ? 'Update your browser to use device sync.' : null }
+export function usbAvailability(): string | null { return !window.isSecureContext ? 'Device sync needs HTTPS. Open the secure server address.' : !desktopBridge() && !navigator.usb ? 'Use desktop Chrome or Edge for USB sync. You can upload audio in this browser.' : !navigator.locks ? 'Update your browser to use device sync.' : null }
 export class BrowserDevice {
-  private readonly device = new JensenDevice(typeof navigator !== 'undefined' ? navigator.usb : undefined)
+  private readonly native = desktopBridge()
+  private readonly device: RecorderTransport = this.native ? new DesktopRecorder(this.native) : new JensenDevice(typeof navigator !== 'undefined' ? navigator.usb : undefined)
   private state: PipelineState = { phase: 'disconnected', device: null, error: null, scanProgress: null, downloadProgress: null }
   private files: DeviceFile[] = []
   private downloads: DownloadState = { queue: [], isPaused: false, isProcessing: false }
@@ -30,9 +33,9 @@ export class BrowserDevice {
     const reason = usbAvailability(); if (reason) throw new Error(reason)
     if (this.busy || this.release) return this.device.isConnected()
     // The permission picker starts synchronously in the click handler.
-    const selection = automatic ? navigator.usb.getDevices().then(devices => devices.find(device => USB_VENDOR_IDS.includes(device.vendorId))) : navigator.usb.requestDevice({ filters: USB_VENDOR_IDS.map(vendorId => ({ vendorId })) })
+    const selection = this.native ? Promise.resolve(null) : automatic ? navigator.usb.getDevices().then(devices => devices.find(device => USB_VENDOR_IDS.includes(device.vendorId))) : navigator.usb.requestDevice({ filters: USB_VENDOR_IDS.map(vendorId => ({ vendorId })) })
     this.publish({ phase: 'connecting', error: null })
-    try { const selected = await selection; if (!selected) { this.publish({ phase: 'disconnected' }); return false }; await this.claim(); if (!await this.device.tryConnect(selected)) throw new Error('The recorder could not be opened. Close other recorder apps and reconnect the USB cable.'); this.info = await this.device.getDeviceInfo(); if (!this.info?.serialNumber) throw new Error('The recorder did not provide a stable identity. Reconnect it before syncing.'); const card = await this.device.getCardInfo(), settings = await this.device.getSettings(), battery = await this.device.getBatteryStatus(); this.publish({ phase: 'idle', device: { model: this.info.model, serialNumber: this.info.serialNumber, firmwareVersion: this.info.versionCode, storage: card ? { used: card.used, capacity: card.capacity, freePercent: card.capacity ? Math.round(card.free / card.capacity * 100) : 0 } : null, settings, battery, recordingCount: 0 } }); await this.sync(); return true } catch (error) { await this.device.disconnect(); await this.freeLock(); this.publish({ phase: 'error', device: null, error: error instanceof Error ? error.message : 'Connection failed.' }); if (automatic) return false; throw error }
+    try { const selected = await selection; if (!selected && !this.native) { this.publish({ phase: 'disconnected' }); return false }; await this.claim(); if (!(this.device instanceof DesktopRecorder ? await (automatic ? this.device.autoConnect() : this.device.tryConnect()) : await this.device.tryConnect(selected!))) throw new Error('The recorder could not be opened. Close other recorder apps and reconnect the USB cable.'); this.info = await this.device.getDeviceInfo(); if (!this.info?.serialNumber) throw new Error('The recorder did not provide a stable identity. Reconnect it before syncing.'); const card = await this.device.getCardInfo(), settings = await this.device.getSettings(), battery = await this.device.getBatteryStatus(); this.publish({ phase: 'idle', device: { model: this.info.model, serialNumber: this.info.serialNumber, firmwareVersion: this.info.versionCode, storage: card ? { used: card.used, capacity: card.capacity, freePercent: card.capacity ? Math.round(card.free / card.capacity * 100) : 0 } : null, settings, battery, recordingCount: 0 } }); await this.sync(); return true } catch (error) { await this.device.disconnect(); await this.freeLock(); this.publish({ phase: 'error', device: null, error: error instanceof Error ? error.message : 'Connection failed.' }); if (automatic) return false; throw error }
   }
   private async freeLock(): Promise<void> { this.release?.(); this.release = null; const ownership = this.ownership; this.ownership = null; await ownership }
   async disconnect(): Promise<void> { try { await this.cancel(); if (this.capture) await this.stopCapture() } finally { await this.device.disconnect(); await this.freeLock(); this.files = []; this.emit('files', this.files); this.publish({ phase: 'disconnected', device: null, error: null }) } }
@@ -46,6 +49,7 @@ export class BrowserDevice {
     for (const command of commands) { const file = this.files.find(file => file.name === command.filename); if (file?.active) continue; if (file) { if (file.length !== command.size) continue; const blob = await this.stage(file); if (await hashBlob(blob) !== command.checksum) continue; if ((await this.device.deleteFile(file.name))?.result !== 'success') throw new Error('Recorder cleanup was not acknowledged. It will be retried on reconnect.') }; await request('/api/v1/device/commands/' + command.id + '/ack', { serial: this.info!.serialNumber, checksum: command.checksum }); if (file) await this.discardStage(file.name); this.files = this.files.filter(file => file.name !== command.filename); this.emit('files', this.files) }
   }
   private async stage(file: DeviceFile): Promise<File> {
+    const reason = browserStorageAvailability(); if (reason) throw new Error(reason)
     const root = await navigator.storage.getDirectory(), key = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(this.info!.serialNumber + ':' + file.name + ':' + file.length + ':' + file.signature)).then(value => [...new Uint8Array(value)].map(n => n.toString(16).padStart(2,'0')).join(''))
     const directory = await root.getDirectoryHandle('hidock-staging', { create: true }), handle = await directory.getFileHandle(key, { create: true }), marker = key + '.complete'
     this.stagedKeys.set(file.name, key)
@@ -64,6 +68,7 @@ export class BrowserDevice {
   async cancel(): Promise<void> { this.controller?.abort(); await this.task?.catch(() => undefined); await this.device.getActiveDownloadSettlement() }
   async deleteFile(name: string, confirmed: boolean): Promise<{ result: string } | null> { if (!confirmed || this.busy || !this.info) throw new Error('Confirm deletion while the recorder is idle.'); const file = this.files.find(file => file.name === name); const verified = (await this.manifest()).recordings.find(row => row.filename === name && row.size === file?.length); if (!file || file.active || !verified || await hashBlob(await this.stage(file)) !== verified.checksum) throw new Error('A matching verified server copy is required.'); const result = await this.device.deleteFile(name); if (result?.result === 'success') { this.files = this.files.filter(file => file.name !== name); this.emit('files', this.files) }; return result }
   async startCapture(): Promise<void> {
+    const reason = usbAvailability() ?? browserStorageAvailability(); if (reason) throw new Error(reason)
     if (this.busy || !this.info || !supportsRealtimeFirmware(this.info.model, this.info.versionNumber)) throw new Error('Live capture requires a connected recorder with supported firmware.')
     const capture = new BrowserCapture(this.device, error => this.publish({ error: error ?? null }))
     this.capture = capture

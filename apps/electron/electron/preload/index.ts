@@ -35,3 +35,4 @@ const api: ElectronAPI = {
   activity: { list: () => ipcRenderer.invoke('activity-log:list'), clear: () => ipcRenderer.invoke('activity-log:clear'), onEntry: cb => subscribe('activity-log:entry', cb), onCleared: cb => subscribe('activity-log:cleared', cb) }
 }
 contextBridge.exposeInMainWorld('electronAPI', api)
+contextBridge.exposeInMainWorld('hidockConnection', { get: () => ipcRenderer.invoke('server-connection:get'), connect: (origin: string) => ipcRenderer.invoke('server-connection:connect', origin), useLocal: () => ipcRenderer.invoke('server-connection:local') })

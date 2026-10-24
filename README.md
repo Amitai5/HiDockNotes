@@ -6,7 +6,7 @@ Turn HiDock recordings and imported audio into searchable transcripts, meeting n
 
 HiDockNotes is a private recording library you can host on your own server. Open it as a website or install the same interface as a PWA. Sync a HiDock directly from desktop Chrome or Edge, upload existing audio, and access your transcripts, meeting notes, tasks and Assistant from any device. Audio storage, CPU transcription and optional semantic search run on the server. ChatGPT plan and API connections can generate summaries and source-linked answers.
 
-The desktop application remains available as a rollback option while physical browser/PWA USB validation is completed. The web build has no Electron runtime or native helper.
+The desktop application can connect to the hosted library while using native USB on your computer, or keep using its separate local library. The website/PWA needs no Electron runtime or native helper. Physical browser/PWA USB validation remains pending.
 
 **[Download the latest release](https://github.com/Amitai5/HiDockNotes/releases/latest)** · [Release history](https://github.com/Amitai5/HiDockNotes/releases) · [Report an issue](https://github.com/Amitai5/HiDockNotes/issues)
 
@@ -52,7 +52,7 @@ See the [self-hosting guide](docs/self-hosting.md) for dataset permissions, reso
 
 ## Desktop installers
 
-Open [the latest GitHub release](https://github.com/Amitai5/HiDockNotes/releases/latest), expand **Assets**, and choose the installer for your computer. The installers bundle the application runtime and audio conversion tools.
+Open [the latest GitHub release](https://github.com/Amitai5/HiDockNotes/releases/latest), expand **Assets**, and choose the installer for your computer. The installers bundle the application runtime and audio conversion tools. To use the server library, open **Settings → General → Server connection**, enter your HTTPS server origin, and choose **Connect to server**. USB runs locally; storage and processing stay on the server. Use the native **Server** menu to change the connection or return to the local library.
 
 | Your computer | File to download | Installation |
 | --- | --- | --- |

@@ -33,7 +33,7 @@ export async function registerAuth(app: FastifyInstance, options: AuthOptions): 
     if (!['GET', 'HEAD'].includes(request.method) && request.headers['x-csrf-token'] !== current.csrf) return reply.code(403).send({ error: 'Refresh the page before trying again.' })
   })
   const issue = (request: FastifyRequest, reply: import('fastify').FastifyReply) => { const secure = request.headers.origin?.startsWith('https://') === true, token = secret(), csrf = secret(); run('DELETE FROM server_sessions WHERE expires_at<=?', [now()]); run('INSERT INTO server_sessions VALUES (?,?,?)', [digest(token), csrf, now() + 7 * 86400000]); reply.setCookie(secure ? cookieNames[0] : cookieNames[1], token, { path: '/', httpOnly: true, secure, sameSite: 'strict', maxAge: 7 * 86400 }); return { authenticated: true, username: owner()!.username, csrf } }
-  app.get('/api/v1/auth/session', async request => { const current = session(request); return { setupRequired: !owner(), authenticated: !!current, username: current ? owner()?.username : undefined, csrf: current?.csrf } })
+  app.get('/api/v1/auth/session', async request => { const current = session(request); return { setupRequired: !owner(), publicOrigin: options.origin, authenticated: !!current, username: current ? owner()?.username : undefined, csrf: current?.csrf } })
   app.post<{ Body: { token: string; username: string; password: string } }>('/api/v1/auth/setup', { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } }, async (request, reply) => {
     const value = request.body
     if (owner()) return reply.code(409).send({ error: 'The owner is already configured.' })

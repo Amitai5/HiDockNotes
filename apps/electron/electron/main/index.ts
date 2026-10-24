@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import product from '../../product.json'
 import { isAbsolute } from 'node:path'
+import { readServerConnection } from './server-connection'
 
 app.setName(product.name)
 if (process.argv.includes('--mcp-stdio')) {
@@ -18,5 +19,6 @@ if (process.argv.includes('--mcp-stdio')) {
     await startAgentBridge()
   }).catch(() => { process.stderr.write('HiDockNotes MCP could not start. Check Settings > Agent connections.\n'); app.exit(1) })
 } else {
-  void import('./desktop').catch(() => { console.error('HiDockNotes could not start.'); app.exit(1) })
+  const entry = readServerConnection(app.getPath('userData')).origin ? import('./hosted-client') : import('./desktop')
+  void entry.catch(() => { console.error('HiDockNotes could not start.'); app.exit(1) })
 }

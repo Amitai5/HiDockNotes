@@ -1,6 +1,6 @@
 {
   "name": "hidocknotes",
-  "version": "0.15.3",
+  "version": "0.15.4",
   "private": true,
   "license": "MIT",
   "packageManager": "npm@11.21.0",
@@ -28,9 +28,9 @@
   "scripts": {
     "dev": "npm run dev --workspace=apps/server",
     "build": "npm run build:web",
-    "typecheck": "npm run typecheck --workspace=packages/jensen-protocol && npm run typecheck --workspace=packages/core && npm run typecheck --workspace=apps/server && npm run typecheck --workspace=apps/web",
-    "lint": "eslint apps/web packages/core/src apps/server packages/jensen-protocol/src packages/jensen-protocol/tests scripts/release",
-    "test": "npm run test:release && npm run test --workspace=packages/jensen-protocol && npm run test:web",
+    "typecheck": "npm run typecheck --workspace=packages/jensen-protocol && npm run typecheck --workspace=packages/core && npm run typecheck --workspace=apps/server && npm run typecheck --workspace=apps/web && npm run typecheck --workspace=apps/electron",
+    "lint": "eslint apps/web packages/core/src apps/server packages/jensen-protocol/src packages/jensen-protocol/tests scripts/release apps/electron/electron/main/hosted-*.ts apps/electron/electron/main/server-connection*.ts apps/electron/electron/preload/server.ts apps/electron/src/components/ServerConnectionPanel.tsx apps/electron/src/server.tsx",
+    "test": "npm run test:release && npm run test:desktop-client && npm run test --workspace=packages/jensen-protocol && npm run test:web",
     "test:release": "node --test scripts/release/*.test.cjs",
     "release:check": "node scripts/release/version.cjs && node scripts/release/hosted.cjs",
     "release:version": "node scripts/release/version.cjs",
@@ -46,7 +46,8 @@
     "test:web": "npm run test --workspace=packages/core && npm run test --workspace=apps/server && npm run test --workspace=apps/web",
     "build:desktop": "npm run build --workspace=packages/jensen-protocol && npm run build --workspace=apps/electron",
     "dev:desktop": "npm run dev --workspace=apps/electron",
-    "start:desktop": "npm run start --workspace=apps/electron"
+    "start:desktop": "npm run start --workspace=apps/electron",
+    "test:desktop-client": "npm run test --workspace=apps/electron -- electron/main/__tests__/server-connection.test.ts electron/main/__tests__/hosted-recorder.test.ts src/components/__tests__/ServerConnectionPanel.test.tsx"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -42,7 +42,7 @@ For a tunnel connector using the NAS host network, configure the published appli
 | --- | --- |
 | `notes.amitai.tech` | `http://localhost:10708` |
 
-Set `APP_ORIGIN=https://notes.amitai.tech`. Cloudflare serves HTTPS to the browser and forwards to the app's HTTP listener. If the connector runs in a separate container with bridge networking, use the NAS LAN IP and port 10708 instead: `localhost` would refer to the connector's own container. No additional application ports need publishing. Keep your existing Cloudflare Access policy if you use one; the app's owner login remains separate.
+Set `APP_ORIGIN=https://notes.amitai.tech`. Cloudflare serves HTTPS to the browser and forwards to the app's HTTP listener. For a connector in a separate container, use the NAS LAN IP and port 10708 as the service URL, for example `http://10.0.0.26:10708`. Verify it with `curl http://<NAS-IP>:10708/healthz`. A healthy tunnel can still return 502 when its connector cannot reach this service. When the connector uses bridge networking, `localhost` would refer to the connector's own container. No additional application ports need publishing. Keep your existing Cloudflare Access policy if you use one; the app's owner login remains separate.
 
 ### Local network access
 
@@ -81,6 +81,14 @@ Sync stages device audio in browser-owned temporary storage before sending it to
 The **Import audio** button accepts existing WAV, MP3, M4A/MP4, FLAC, Ogg/Opus, WebM, AAC, and HiDock HDA recordings. Uploads go to the server, not another client's local library. The website requires a server connection for private library data; the service worker caches only the app shell and static assets.
 
 Live capture sends sequenced stereo PCM frames to the server and saves a WAV. An interrupted server-side prefix is available under Sync for explicit recovery. Treat live capture as pending physical-recorder validation until the browser/PWA gate below is completed.
+
+## Desktop client for the server library
+
+In the desktop app, open **Settings → General → Server connection**, enter your HTTPS server origin, and choose **Connect to server**. The app reopens at your server's owner login. It loads the hosted interface and uses the laptop's native USB backend; recordings upload to the server, and transcription/AI processing stay on the server. This mode starts no local library database or AI workers.
+
+Use **Server → Change server** or **Server → Use local library** in the native menu to switch back. Existing local recordings are kept; connecting does not merge two libraries. Transfer local recordings using a complete backup and server restore. Only the exact configured origin can use the restricted native USB bridge. Cloudflare Access and identity-provider pages receive no native bridge. Node integration stays disabled and the hosted window remains sandboxed.
+
+Server mode requires HTTPS for browser file staging, apart from localhost HTTP during development. Direct browser sync also needs HTTPS. The local HTTP Sync page offers **Open secure device sync** and disables unavailable USB/capture controls; server-side audio recovery remains available.
 
 ## AI and ChatGPT plan setup
 

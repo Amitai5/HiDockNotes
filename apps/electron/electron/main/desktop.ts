@@ -50,6 +50,7 @@ import { parseCalendarInWorker } from './calendar/calendar-worker-runner'
 import { registerCalendarHandlers } from './ipc/calendar-handlers'
 import type { AssistantConversations } from './services/assistant-conversations'
 import { readReferenceContext } from './services/reference-context'
+import { registerServerConnection } from './server-connection-ipc'
 
 app.setName(product.name)
 app.setAppUserModelId(product.appId)
@@ -102,6 +103,7 @@ async function createWindow(): Promise<void> {
   if (process.platform === 'darwin') app.dock?.setIcon(icon)
   setIpcOwner(window)
   registerAppHandlers(window)
+  registerServerConnection(window, () => getDevicePipelineService().getState().phase)
   libraryBackup = registerBackupHandlers(window)
   const encryption = { isAvailable: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'), encrypt: (value: string) => safeStorage.encryptString(value), decrypt: (value: Buffer) => safeStorage.decryptString(value) }
   const vault = new CredentialVault(encryption)

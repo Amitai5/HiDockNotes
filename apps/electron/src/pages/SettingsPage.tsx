@@ -14,6 +14,7 @@ import { SETTINGS_TABS, searchSettings, type SettingsTab } from '../settings/cat
 import { SemanticSearchSettings } from '../components/SemanticSearchSettings'
 import { CalendarSettings } from '../components/CalendarSettings'
 import { BrandMark } from '../components/BrandMark'
+import { ServerConnectionPanel } from '../components/ServerConnectionPanel'
 
 const tabIcons = { general: UserRound, ai: AudioLines, voices: Mic2, calendars: CalendarDays, device: FolderOpen, agents: Plug, about: Info }
 export function SettingsPage(): JSX.Element {
@@ -49,6 +50,7 @@ export function SettingsPage(): JSX.Element {
     })}</div>
     {query.trim() && <div className="settings-search-results" role="region" aria-label="Settings search results"><p className="muted" role="status">{results.length} matching setting{results.length === 1 ? '' : 's'}</p>{results.length ? results.map(result => <button key={result.title} onClick={() => select(result.tab, result.id)}><Search size={17} /><div><small>{SETTINGS_TABS.find(value => value.id === result.tab)?.label}</small><strong>{result.title}</strong></div><ChevronRight size={16} /></button>) : <EmptyState icon={<Search size={26} />} title="No matching settings">Try a word such as language, storage, voice, or MCP.</EmptyState>}</div>}
     <div hidden={!!query.trim() || tab !== 'general'} role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general">
+      <ServerConnectionPanel />
       <section className="settings-section" id="your-name" tabIndex={-1}><h2><UserRound size={18} />Your name</h2><form className="name-form" onSubmit={event => { event.preventDefault(); void updateSettings({ name }).then(success => setSaved(success)) }}><input aria-label="Your name" placeholder="Your name" value={name} onChange={event => { setName(event.target.value); setSaved(false) }} maxLength={80} /><Button type="submit" variant="primary">{saved ? <Check size={15} /> : null}{saved ? 'Saved' : 'Save name'}</Button></form></section>
       <section className="settings-section" id="appearance" tabIndex={-1}><h2>Appearance</h2><div className="appearance-options">{([{ value: 'light', label: 'Light', Icon: Sun }, { value: 'dark', label: 'Dark', Icon: Moon }, { value: 'system', label: 'System', Icon: Monitor }] as const).map(({ value, label, Icon }) => <button key={value} className={settings?.appearance === value ? 'selected' : ''} onClick={() => { void updateSettings({ appearance: value }) }}><Icon size={20} />{label}{settings?.appearance === value && <Check size={14} />}</button>)}</div></section>
       <GlobalReferenceContext />

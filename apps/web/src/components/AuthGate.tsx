@@ -2,10 +2,11 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { BrandMark } from './BrandMark'
 import { connectEvents, request, setCsrf, clientEvents } from '../services/http'
 import { browserDevice } from '../services/browser-device'
-interface Session { authenticated: boolean; setupRequired?: boolean; username?: string; csrf?: string }
+import { setServerOrigin } from '../services/server-origin'
+interface Session { publicOrigin?: string; authenticated: boolean; setupRequired?: boolean; username?: string; csrf?: string }
 export function AuthGate({ children }: { children: ReactNode }): JSX.Element {
   const [session, setSession] = useState<Session | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  useEffect(() => { void request<Session>('/api/v1/auth/session').then(value => { setCsrf(value.csrf ?? ''); setSession(value) }).catch(error => setError(error.message)); const signedOut = () => { setCsrf(''); setSession({ authenticated: false }); void browserDevice.disconnect().catch(() => undefined) }; clientEvents.addEventListener('signed-out', signedOut); return () => clientEvents.removeEventListener('signed-out', signedOut) }, [])
+  useEffect(() => { void request<Session>('/api/v1/auth/session').then(value => { setServerOrigin(value.publicOrigin); setCsrf(value.csrf ?? ''); setSession(value) }).catch(error => setError(error.message)); const signedOut = () => { setCsrf(''); setSession({ authenticated: false }); void browserDevice.disconnect().catch(() => undefined) }; clientEvents.addEventListener('signed-out', signedOut); return () => clientEvents.removeEventListener('signed-out', signedOut) }, [])
   useEffect(() => session?.authenticated ? connectEvents() : undefined, [session?.authenticated])
   if (session?.authenticated) return <>{children}</>
   return <main className="auth-screen"><form className="auth-card" onSubmit={event => { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); setError(''); void request<Session>('/api/v1/auth/' + (session?.setupRequired ? 'setup' : 'login'), { username: form.get('username'), password: form.get('password'), ...(session?.setupRequired ? { token: form.get('token') } : {}) }).then(value => { setCsrf(value.csrf ?? ''); setSession(value) }).catch(error => setError(error.message)).finally(() => setBusy(false)) }}>

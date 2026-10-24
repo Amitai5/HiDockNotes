@@ -1,3 +1,4 @@
+import { desktopBridge } from '../services/desktop-recorder'
 import { USB_VENDOR_IDS } from '@hidock/jensen-protocol'
 import { appClient } from '../services/app-client'
 // Adapted from sgeraldes/hidock-next-2 @ 31d44da (MIT).
@@ -25,7 +26,8 @@ export function useDeviceSubscriptions(): void {
     void appClient.settings.get().then(settings => { if (mounted) { useAppStore.getState().setSettings(settings); if (settings.autoConnect && !usbAvailability()) void browserDevice.connect(true).catch(reportError) } }).catch(reportError)
     const interval = setInterval(() => { if (!browserDevice.busy) void browserDevice.sync().catch(reportError) }, 60000)
     const detached = (event: USBConnectionEvent) => { if (!USB_VENDOR_IDS.includes(event.device.vendorId)) return; void browserDevice.disconnect().catch(reportError) }
+    const removeNative = desktopBridge()?.onDetached(() => { void browserDevice.disconnect().catch(reportError) })
     navigator.usb?.addEventListener('disconnect', detached)
-    return () => { mounted = false; clearInterval(interval); navigator.usb?.removeEventListener('disconnect', detached); removeLocal(); removeMain(); removeCleared() }
+    return () => { mounted = false; clearInterval(interval); removeNative?.(); navigator.usb?.removeEventListener('disconnect', detached); removeLocal(); removeMain(); removeCleared() }
   }, [])
 }

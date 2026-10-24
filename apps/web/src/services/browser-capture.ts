@@ -1,12 +1,13 @@
 import type { RealtimeData } from '@hidock/jensen-protocol'
 import { request, response, clientEvents } from './http'
+import { browserStorageAvailability } from './browser-storage'
 
 interface CaptureSource { startRealtime(mode: number): Promise<{ result: string } | null>; stopRealtime(): Promise<{ result: string } | null>; getRealtimeData(): Promise<RealtimeData | null> }
 interface CaptureRecord { id: string; serial: string }
 interface ServerCapture { id: string; state: string; frames: number; bytes: number }
 const BLOCK = 64 * 1024
 const LIMIT = 8 * 1024 * 1024
-async function root(): Promise<FileSystemDirectoryHandle> { return (await navigator.storage.getDirectory()).getDirectoryHandle('hidock-captures', { create: true }) }
+async function root(): Promise<FileSystemDirectoryHandle> { const reason = browserStorageAvailability(); if (reason) throw new Error(reason); return (await navigator.storage.getDirectory()).getDirectoryHandle('hidock-captures', { create: true }) }
 async function save(directory: FileSystemDirectoryHandle, name: string, data: Uint8Array | string): Promise<void> { const writable = await (await directory.getFileHandle(name, { create: true })).createWritable(); try { await writable.write(data); await writable.close() } catch (error) { await writable.abort().catch(() => undefined); throw error } }
 
 /** Durable PCM chunks decouple USB reads from server latency. Only acknowledged chunks are discarded. */
@@ -26,6 +27,7 @@ export class BrowserCapture {
   private record: CaptureRecord | null = null
   constructor(private readonly source: CaptureSource, private readonly changed: (error?: string) => void) {}
   async start(serial: string): Promise<void> {
+    const reason = browserStorageAvailability(); if (reason) throw new Error(reason)
     const capture = await request<{ id: string }>('/api/v1/captures', { serial })
     this.record = { id: capture.id, serial }; this.directory = await (await root()).getDirectoryHandle(capture.id, { create: true })
     await save(this.directory, 'capture.json', JSON.stringify(this.record))
