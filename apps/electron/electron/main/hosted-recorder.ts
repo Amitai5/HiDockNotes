@@ -11,16 +11,21 @@ const size = (value: unknown, max: number): number => { if (!Number.isSafeIntege
 /** Native USB only. This service has no account tokens, server client, database or AI workers. */
 export class HostedRecorder {
   private controller: AbortController | null = null
+  private connecting: Promise<boolean> | null = null
   private transfer: Promise<unknown> | null = null
   private stage: Stage | null = null
   private streaming = false
   constructor(private readonly device: Recorder, private readonly temporaryPath: string, private readonly progress: (bytes: number) => void) {}
-  get busy(): boolean { return !!this.controller || this.streaming }
+  get busy(): boolean { return !!this.controller || !!this.connecting || this.streaming }
   async call(operation: string, args: unknown[]): Promise<unknown> {
     if (!Array.isArray(args) || args.length > 3) throw new Error('Invalid native recorder request.')
     if (this.busy && !['download:read', 'download:finish', 'cancel', 'disconnect', 'getRealtimeData', 'stopRealtime'].includes(operation)) throw new Error('Finish the current recorder operation first.')
     switch (operation) {
-      case 'connect': return args[0] === true ? this.device.tryConnect() : this.device.connect()
+      case 'connect': {
+        const pending = args[0] === true ? this.device.tryConnect() : this.device.connect()
+        this.connecting = pending
+        try { return await pending } finally { if (this.connecting === pending) this.connecting = null }
+      }
       case 'disconnect': await this.close(); return null
       case 'getDeviceInfo': return this.device.getDeviceInfo()
       case 'getCardInfo': return this.device.getCardInfo()
@@ -50,11 +55,12 @@ export class HostedRecorder {
   }
   private async download(name: string, length: number): Promise<{ id: string; size: number }> {
     if (this.controller) throw new Error('A transfer is already running.')
-    const active = await this.device.getRecordingFile()
-    if (active?.recording === name) throw new Error('The recorder is still saving this recording.')
     this.controller = new AbortController()
     const signal = this.controller.signal
     const task = (async () => {
+      const active = await this.device.getRecordingFile()
+      signal.throwIfAborted()
+      if (active?.recording === name) throw new Error('The recorder is still saving this recording.')
       const folder = await mkdtemp(join(this.temporaryPath, 'hidock-server-'))
       try {
         const file = await open(join(folder, 'recording.part'), 'wx+', 0o600)
@@ -82,7 +88,7 @@ export class HostedRecorder {
   }
   private async clearStage(): Promise<void> { const stage = this.stage; this.stage = null; if (stage) { await stage.file.close(); await rm(stage.folder, { recursive: true, force: true }) } }
   async cancel(): Promise<void> { this.controller?.abort(); await this.transfer?.catch(() => undefined); await this.device.getActiveDownloadSettlement(); await this.clearStage(); this.controller = null }
-  async close(): Promise<void> { await this.cancel(); try { if (this.streaming) await this.device.stopRealtime() } finally { this.streaming = false; await this.device.disconnect() } }
+  async close(): Promise<void> { await this.connecting?.catch(() => undefined); await this.cancel(); try { if (this.streaming) await this.device.stopRealtime() } finally { this.streaming = false; await this.device.disconnect() } }
 }
 
 export function isTrustedServerFrame(frameUrl: string, origin: string): boolean {

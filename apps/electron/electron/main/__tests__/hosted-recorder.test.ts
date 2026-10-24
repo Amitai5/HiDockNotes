@@ -13,6 +13,21 @@ beforeEach(async () => {
 afterEach(async () => { await recorder.close(); await rm(directory, { recursive: true, force: true }) })
 describe('native USB for a hosted library', () => {
   it('opens native USB without starting local database or processing services', async () => { expect(await recorder.call('connect', [false])).toBe(true); expect(await recorder.call('connect', [true])).toBe(false); expect(device.connect).toHaveBeenCalledOnce(); expect(device.tryConnect).toHaveBeenCalledOnce() })
+  it('stays busy during connection and drains it before shutdown', async () => {
+    let connected!: (value: boolean) => void
+    device.connect.mockReturnValue(new Promise<boolean>(resolve => { connected = resolve }))
+    const connection = recorder.call('connect', [false]); expect(recorder.busy).toBe(true)
+    const closed = recorder.close(); await Promise.resolve(); expect(device.disconnect).not.toHaveBeenCalled()
+    connected(true); await connection; await closed; expect(recorder.busy).toBe(false); expect(device.disconnect).toHaveBeenCalledOnce()
+  })
+  it('cancels safely while checking a file before its USB transfer starts', async () => {
+    let checked!: (value: unknown) => void
+    device.getRecordingFile.mockReturnValue(new Promise(resolve => { checked = resolve }))
+    const transfer = recorder.call('download:begin', ['meeting.hda', 100]); const rejected = expect(transfer).rejects.toThrow()
+    expect(recorder.busy).toBe(true)
+    const cancelled = recorder.cancel(); checked({ recording: null }); await cancelled; await rejected
+    expect(device.downloadFile).not.toHaveBeenCalled(); expect(await readdir(directory)).toEqual([])
+  })
   it('stages a verified-length transfer and serves bounded chunks without exposing file paths', async () => {
     const stage = await recorder.call('download:begin', ['meeting.hda', 150000]) as { id: string; size: number }
     expect(Object.keys(stage).sort()).toEqual(['id', 'size']); expect(recorder.busy).toBe(true)
