@@ -5,44 +5,33 @@ const { createRequire } = require('node:module')
 const { spawnSync } = require('node:child_process')
 const { root, readVersion } = require('./version.cjs')
 
+const forbidden = ['better-sqlite3', 'ffmpeg-static', 'sherpa-onnx-node', 'onnxruntime-node', '@huggingface/transformers', '@google/genai', 'openai', 'ical.js', 'electron-updater', '@hidock/core']
 function smoke(resources) {
-  const load = createRequire(resources ? path.join(resources, 'app.asar', 'package.json') : path.join(root, 'apps/electron/package.json'))
-  const Database = load('better-sqlite3')
-  const database = new Database(':memory:')
-  try {
-    database.exec('CREATE VIRTUAL TABLE smoke USING fts5(text); INSERT INTO smoke VALUES (\'local notes\')')
-    assert.equal(database.prepare("SELECT count(*) AS count FROM smoke WHERE smoke MATCH 'notes'").get().count, 1)
-  } finally { database.close() }
+  const directory = resources ? path.join(resources, 'app.asar') : path.join(root, 'apps/electron')
+  const load = createRequire(path.join(directory, 'package.json'))
+  assert.deepEqual(Object.keys(load('./package.json').dependencies).sort(), ['@hidock/jensen-protocol', 'usb'])
   assert.equal(typeof load('usb').findByIds, 'function')
-  assert.equal(typeof load('sherpa-onnx-node').OfflineRecognizer, 'function')
-  assert.equal(typeof load('ical.js').parse, 'function')
-  // Speech and search use different ONNX runtimes; match the app's worker
-  // isolation instead of loading both DLL versions into one Windows process.
-  const searchCheck = spawnSync(process.execPath, [__filename, '--search-runtime', ...(resources ? [resources] : [])], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60000, windowsHide: true })
-  if (searchCheck.error) { throw searchCheck.error }
-  if (searchCheck.status !== 0) { throw new Error(`Search runtime check failed for ${process.platform}-${process.arch}:\n${searchCheck.stderr}`) }
-  assert.equal(typeof load('electron-updater').NsisUpdater, 'function')
-  assert.ok(fs.statSync(path.join(path.dirname(load.resolve('electron-updater/package.json')), 'LICENSE')).size > 0, 'updater license')
-  const ffmpeg = load('ffmpeg-static').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`)
-  const conversion = spawnSync(ffmpeg, ['-version'], { encoding: 'utf8', timeout: 30000, windowsHide: true })
-  if (conversion.error) { throw conversion.error }
-  assert.equal(conversion.status, 0, conversion.stderr)
-  assert.match(conversion.stdout, /ffmpeg version/)
+  assert.equal(typeof load('@hidock/jensen-protocol').JensenDevice, 'function')
+  for (const file of ['out/main/index.js', 'out/preload/server.js', 'out/renderer/server.html']) assert.ok(fs.statSync(path.join(directory, file)).size > 0, file)
+  for (const file of ['out/main/desktop.js', 'out/main/transcription-worker.js', 'out/main/embedding-worker.js', 'out/main/calendar-worker.js', 'out/main/mcp-launcher.js', 'out/preload/index.js', 'out/renderer/index.html']) assert.ok(!fs.existsSync(path.join(directory, file)), `Desktop must not ship ${file}`)
   if (resources) {
-    const searchLoad = createRequire(load.resolve('@huggingface/transformers'))
-    const runtime = path.join(path.dirname(searchLoad.resolve('onnxruntime-node/package.json')), 'bin/napi-v6')
-    assert.deepEqual(fs.readdirSync(runtime), [process.platform], 'installer contains only its own ONNX platform')
-    assert.deepEqual(fs.readdirSync(path.join(runtime, process.platform)), [process.arch], 'installer contains only its own ONNX architecture')
-    const policy = load('./resources/update-policy.json')
-    assert.equal(typeof policy.signed, 'boolean')
-    if (policy.signed) { assert.match(policy.publicKey, /BEGIN PUBLIC KEY/) }
-    assert.equal(load('./package.json').version, readVersion())
-    for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'mcp-launcher.cjs']) { assert.ok(fs.statSync(path.join(resources, file)).size > 0, file) }
-    for (const file of ['out/main/index.js', 'out/main/transcription-worker.js', 'out/main/embedding-worker.js', 'out/main/calendar-worker.js', 'out/preload/index.js', 'out/renderer/index.html']) {
-      assert.ok(fs.statSync(path.join(resources, 'app.asar', file)).size > 0, file)
+    function inspectModules(folder) {
+      if (!fs.existsSync(folder)) return
+      for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        const target = path.join(folder, entry.name)
+        if (entry.name.startsWith('@')) { inspectModules(target); continue }
+        const name = path.basename(folder).startsWith('@') ? path.basename(folder) + '/' + entry.name : entry.name
+        assert.ok(!forbidden.includes(name) && !name.startsWith('sherpa-onnx-'), `Desktop must not ship ${name}`)
+        inspectModules(path.join(target, 'node_modules'))
+      }
     }
+    inspectModules(path.join(directory, 'node_modules'))
+    assert.equal(load('./package.json').version, readVersion())
+    for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'icon.png']) assert.ok(fs.statSync(path.join(resources, file)).size > 0, file)
+    assert.ok(!fs.existsSync(path.join(resources, 'mcp-launcher.cjs')), 'No local MCP launcher')
   }
-  console.log(`Native smoke passed for ${process.platform}-${process.arch}${resources ? ' (packaged Electron)' : ' (Node)'}. SQLite/FTS, USB binding, speech and search runtimes, calendar parser, updater and ffmpeg loaded.`)
+  console.log(`Desktop client smoke passed for ${process.platform}-${process.arch}${resources ? ' (packaged Electron)' : ' (Node)'}. Native USB, server setup and restricted preload are present; local library, workers and AI runtimes are absent.`)
 }
 
 function packagedSmoke() {
@@ -60,29 +49,10 @@ function packagedSmoke() {
     resources = path.join(app, 'Resources')
   } else { throw new Error(`Unsupported platform ${process.platform}.`) }
   const result = spawnSync(executable, [__filename, '--resources', resources], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: 'inherit', timeout: 60000, windowsHide: true })
-  if (result.error) { throw result.error }
-  if (result.status !== 0) { throw new Error(`Packaged native smoke failed (exit ${result.status}, signal ${result.signal}).`) }
+  if (result.error) throw result.error
+  if (result.status !== 0) throw new Error(`Packaged client smoke failed (exit ${result.status}, signal ${result.signal}).`)
 }
-
-async function searchRuntimeSmoke(resources) {
-  const load = createRequire(resources ? path.join(resources, 'app.asar', 'package.json') : path.join(root, 'apps/electron/package.json'))
-  assert.equal(typeof load('@huggingface/transformers').pipeline, 'function')
-  const ort = createRequire(load.resolve('@huggingface/transformers'))('onnxruntime-node')
-  // A float32[1] Identity graph (ONNX IR 8, opset 13). No model download is needed.
-  const model = Buffer.from('08083a420a100a017812017922084964656e74697479120c6e61746976652d736d6f6b655a0f0a0178120a0a08080112040a020801620f0a0179120a0a08080112040a0208014202100d', 'hex')
-  const session = await ort.InferenceSession.create(model, { executionProviders: ['cpu'], intraOpNumThreads: 1, interOpNumThreads: 1 })
-  try {
-    const result = await session.run({ x: new ort.Tensor('float32', Float32Array.from([42]), [1]) })
-    assert.deepEqual(Array.from(result.y.data), [42])
-  } finally { await session.release() }
-}
-
 if (require.main === module) {
-  void (async () => {
-    if (process.argv[2] === '--search-runtime') {
-      await searchRuntimeSmoke(process.argv[3])
-    }
-    else if (process.argv[2] === '--packaged') { packagedSmoke() }
-    else { smoke(process.argv[2] === '--resources' ? process.argv[3] : undefined) }
-  })().catch(error => { console.error(error.message); process.exitCode = 1 })
+  try { if (process.argv[2] === '--packaged') packagedSmoke(); else smoke(process.argv[2] === '--resources' ? process.argv[3] : undefined) }
+  catch (error) { console.error(error.message); process.exitCode = 1 }
 }

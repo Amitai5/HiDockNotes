@@ -52,6 +52,7 @@ ENV NODE_ENV=production PORT=3000 HOST=0.0.0.0 DATA_DIR=/data BACKUP_DIR=/backup
 RUN apt-get update && apt-get install -y --no-install-recommends bzip2 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY scripts/release/archive-smoke.cjs scripts/release/archive-smoke.cjs
+COPY scripts/release/server-runtime-smoke.cjs scripts/release/server-runtime-smoke.cjs
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=production-dependencies /app/packages/core/package.json ./packages/core/package.json
 COPY --from=production-dependencies /app/packages/jensen-protocol/package.json ./packages/jensen-protocol/package.json
@@ -61,7 +62,7 @@ COPY --from=compiled /app/apps/server/dist ./apps/server/dist
 COPY LICENSE THIRD_PARTY_NOTICES.md ./
 RUN mkdir /data /backups && chown node:node /data /backups
 USER node
-RUN node scripts/release/archive-smoke.cjs
+RUN node scripts/release/archive-smoke.cjs && node scripts/release/server-runtime-smoke.cjs
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 CMD ["node", "apps/server/dist/index.cjs"]

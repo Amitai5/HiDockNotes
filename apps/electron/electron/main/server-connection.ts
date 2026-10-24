@@ -17,9 +17,9 @@ export function readServerConnection(directory: string): ServerConnection {
   const saved = JSON.parse(readFileSync(file, 'utf8')) as ServerConnection
   return { origin: saved.origin === null ? null : validateServerOrigin(saved.origin) }
 }
-/** Connection preferences are separate from local library settings and never store account credentials. */
-export function saveServerConnection(directory: string, origin: string | null): void {
-  const value = { origin: origin === null ? null : validateServerOrigin(origin) }
+/** The desktop stores only the server address here, never library data or provider credentials. */
+export function saveServerConnection(directory: string, origin: string): void {
+  const value = { origin: validateServerOrigin(origin) }
   mkdirSync(directory, { recursive: true })
   const file = join(directory, 'server-connection.json'), temporary = file + '.tmp'
   writeFileSync(temporary, JSON.stringify(value) + '\n', { mode: 0o600 })

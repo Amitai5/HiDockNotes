@@ -18,8 +18,6 @@ function signingPolicy(env = process.env, platform = process.platform) {
 }
 function writePolicy(appRoot, env = process.env, platform = process.platform) {
   const policy = signingPolicy(env, platform)
-  const dependencies = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8')).dependencies
-  if (policy.signed && !dependencies['electron-updater']) { throw new Error('Signed in-app releases require the electron-updater production dependency.') }
   fs.writeFileSync(path.join(appRoot, 'resources', 'update-policy.json'), JSON.stringify(policy, null, 2) + '\n')
   return policy
 }

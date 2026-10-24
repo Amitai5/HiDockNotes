@@ -1,9 +1,35 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
-    "strict": true, "noEmit": true, "skipLibCheck": true, "esModuleInterop": true, "resolveJsonModule": true,
-    "types": ["node", "w3c-web-usb"], "lib": ["ES2022", "DOM"]
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": [
+      "node",
+      "w3c-web-usb"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ]
   },
-  "include": ["electron/**/*.ts", "src/shared/**/*.ts", "electron.vite.config.ts", "vitest.config.ts"],
-  "exclude": ["**/__tests__/**"]
+  "include": [
+    "electron/main/index.ts",
+    "electron/main/hosted-client.ts",
+    "electron/main/hosted-recorder.ts",
+    "electron/main/server-connection.ts",
+    "electron/main/services/jensen.ts",
+    "electron/main/services/native-usb-guard.ts",
+    "electron/preload/server.ts",
+    "src/shared/server-connection.ts",
+    "electron.vite.config.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "**/__tests__/**"
+  ]
 }

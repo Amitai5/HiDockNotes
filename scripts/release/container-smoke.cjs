@@ -11,6 +11,7 @@ async function main() {
     for (let attempt=0;attempt<30;attempt++) { try { const health=JSON.parse(docker('exec',name,'node','-e',"fetch('http://127.0.0.1:10708/healthz').then(r=>r.text()).then(console.log).catch(()=>process.exit(1))")); if(health.status==='ok'){healthy=true;break} } catch { /* Startup is bounded; print container logs on final failure. */ }; await new Promise(resolve=>setTimeout(resolve,1000)) }
     assert.ok(healthy, 'The image did not become healthy.')
     docker('exec', name, 'node', 'scripts/release/archive-smoke.cjs')
+    docker('exec', name, 'node', 'scripts/release/server-runtime-smoke.cjs')
     const healthcheck = JSON.parse(docker('inspect','--format','{{json .Config.Healthcheck.Test}}',name))
     docker('exec',name,'sh','-c',healthcheck[1])
     docker('exec',name,'node','-e',`Promise.all([fetch('http://127.0.0.1:10708/').then(r=>{if(!r.ok)throw Error('Missing website')}),fetch('http://127.0.0.1:10708/manifest.webmanifest').then(r=>r.json()).then(m=>{if(m.display!=='standalone')throw Error('Missing PWA manifest')}),fetch('http://127.0.0.1:10708/api/v1/device/manifest?serial=test').then(r=>{if(r.status!==401)throw Error('Unprotected library')})]).catch(e=>{console.error(e);process.exit(1)})`)

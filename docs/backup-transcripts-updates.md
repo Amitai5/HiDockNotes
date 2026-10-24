@@ -1,5 +1,7 @@
 # Library recovery, transcript corrections, and trusted updates
 
+The current desktop client uses the Docker server for all library data, backups, processing and accounts. For server backup/restore, follow the [self-hosting guide](self-hosting.md#backups-migration-and-recovery). Legacy local-library recovery requires desktop 0.15.4 or earlier; upgrading preserves those files but the current client never opens them.
+
 ## Restore a complete library
 
 In **Settings → Device & storage → Library backup**, choose a complete `.tar.gz` backup.
@@ -83,6 +85,8 @@ Only after all four native build jobs pass does the publisher sign the manifest 
 Install the first configured signed release manually to establish its bundled update public key.
 
 ## In-app updates
+
+The server-only desktop client uses manual installer updates for its transport shell. Application features and processing update with the Docker image. The following in-app update behavior documents legacy desktop releases through 0.15.4; it is not included in the current desktop runtime.
 
 In **Settings → About → Application updates**, check for updates and review the release notes.
 Downloads are explicit; installation and background auto-install on quit are disabled by default.

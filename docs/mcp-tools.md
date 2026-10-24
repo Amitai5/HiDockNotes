@@ -1,6 +1,6 @@
 # MCP tools
 
-Enable **Settings → Agent connections → MCP access**, copy the configuration into your MCP client, and keep HiDockNotes open. All seven tools are read-only. Returned recording text and reference context are source material, never instructions for the connected agent.
+Enable **Settings → Agent connections → MCP access**, copy the server HTTPS configuration into your MCP client, and keep the Docker server running. All seven tools are read-only. Returned recording text and reference context are source material, never instructions for the connected agent.
 
 ## Search by meaning
 
@@ -12,7 +12,7 @@ Call `search_recordings`:
 
 The optional local model and keyword matches are combined into one ranked list. `mode` defaults to `keywords` for existing clients. `requestedMode`, `mode`, and `fallbackReason` report whether meaning search ran; `indexing` identifies incomplete indexing, and `semanticResultsTruncated` identifies the 1,000-recording semantic candidate limit. Keyword matches have no such candidate cap. Each result includes a matching excerpt, match source, and timestamp where available. Summary/title matches have no audio timestamp.
 
-Omit `projectId` to search all recordings. Use an existing project ID to scope the search, or `null` for unfiled recordings. Continue with `nextOffset`. Enabling MCP does not enable meaning search or download a model; use Settings to opt in. Inference runs on this computer.
+Omit `projectId` to search all recordings. Use an existing project ID to scope the search, or `null` for unfiled recordings. Continue with `nextOffset`. Enabling MCP does not enable meaning search or download a model; use Settings to opt in. Inference runs on the Docker server.
 
 ## Read saved background
 
@@ -36,4 +36,4 @@ Outcome metadata is saved with summaries and included in complete library backup
 
 ## Import existing audio
 
-Choose **Library → Import audio** to select one or more MP3, M4A, WAV, OGG, FLAC, or HDA files under 2 GB each. The app copies and verifies them locally, preserves the originals, and queues them for transcription and summaries according to your processing settings. This existing import path is available without a HiDock connection; MCP does not accept filesystem paths or import audio.
+Choose **Library → Import audio** to select one or more MP3, M4A, WAV, OGG, FLAC, or HDA files under 2 GB each. The app uploads and verifies them on the server, preserves the originals, and queues them for transcription and summaries according to your processing settings. This existing import path is available without a HiDock connection; MCP does not accept filesystem paths or import audio.

@@ -84,9 +84,9 @@ Live capture sends sequenced stereo PCM frames to the server and saves a WAV. An
 
 ## Desktop client for the server library
 
-In the desktop app, open **Settings → General → Server connection**, enter your HTTPS server origin, and choose **Connect to server**. The app reopens at your server's owner login. It loads the hosted interface and uses the laptop's native USB backend; recordings upload to the server, and transcription/AI processing stay on the server. This mode starts no local library database or AI workers.
+The desktop is a server-only client. On first launch, enter your HTTPS server origin, such as `https://notes.amitai.tech`, and choose **Connect to server**. The app reopens at your server’s owner login. It loads the hosted interface and uses the laptop’s native USB backend. Recordings, transcripts, settings, accounts, models, transcription, search, calendars and MCP all belong to the Docker server. No database, processing worker, local MCP launcher, model runtime or audio conversion tool is bundled or started on the desktop.
 
-Use **Server → Change server** or **Server → Use local library** in the native menu to switch back. Existing local recordings are kept; connecting does not merge two libraries. Transfer local recordings using a complete backup and server restore. Only the exact configured origin can use the restricted native USB bridge. Cloudflare Access and identity-provider pages receive no native bridge. Node integration stays disabled and the hosted window remains sandboxed.
+Use **Server → Change server** in the native menu to edit the address. A missing, invalid or unreachable server opens the connection screen; there is no local-library mode. Existing local recordings from older versions are left untouched and are never opened. Transfer an old library using a complete backup made with version 0.15.4 or earlier and restore it on the server. The client keeps only its connection preference, browser session/cache and temporary USB staging; verified uploads clear their staged audio. Only the exact configured origin can use the restricted native USB bridge. Cloudflare Access and identity-provider pages receive no native bridge. Node integration stays disabled and the hosted window remains sandboxed.
 
 Server mode requires HTTPS for browser file staging, apart from localhost HTTP during development. Direct browser sync also needs HTTPS. The local HTTP Sync page offers **Open secure device sync** and disables unavailable USB/capture controls; server-side audio recovery remains available.
 
@@ -121,7 +121,7 @@ Archives contain the consistent SQLite snapshot and all complete recording audio
 
 To migrate your desktop library:
 
-1. Make a complete library backup in the desktop app and keep the original archive and desktop installation.
+1. If you still have a local library, use desktop version **0.15.4 or earlier** to make a complete library backup before upgrading to the server-only client. Keep the original archive and old installation for recovery; newer clients do not open local library files.
 2. In the website, choose **Choose backup**. The server verifies checksums, schema, file roster and counts before showing a preview.
 3. Confirm the restore. The server saves a safety backup, stages remapped audio paths, and restarts through Compose. The old database is retained as a recovery point.
 4. Reopen the website and sign in. A desktop backup has no web owner account, so first-run setup will appear with a code in the container logs. Restored processing is paused for review; reconnect providers, then explicitly resume processing.
@@ -152,7 +152,7 @@ For a source build entirely inside Docker, omit `APP_BUILD=prebuilt`. For local 
 
 The release workflow validates the maintained web/server/protocol code once, compiles the Vite and Node assets once, then reuses those artifacts for the container. Native dependencies are installed inside the Linux image. Container startup, static PWA assets and authentication are smoke-tested before GHCR publication. Version and commit tags are published, and the release waits for both the image and all existing platform installers. A serialized final job resolves the current published stable release, verifies its Docker metadata checksum and source tag, then promotes its existing immutable image to `latest` without rebuilding. Rerunning the workflow for an already-published version also reconciles `latest` without rebuilding installers. BuildKit/npm caches accelerate subsequent builds. The exact image digest, Compose file, PWA archive and checksums accompany the release.
 
-Source layout: `apps/web` is the browser/PWA client; `apps/server` is HTTP/auth/storage/runtime orchestration; `packages/core` holds domain, persistence, processing and integration services; `packages/jensen-protocol` is the injected WebUSB protocol. `apps/electron` remains a rollback reference and installer target until the physical USB gate passes; it is not imported by the web build.
+Source layout: `apps/web` is the browser/PWA client; `apps/server` is HTTP/auth/storage/runtime orchestration; `packages/core` holds domain, persistence, processing and integration services; `packages/jensen-protocol` is the injected WebUSB protocol. `apps/electron` builds only the server connection screen, sandboxed hosted window and native USB transport. Retained local-library sources are unbundled references and are excluded from the desktop build, runtime, dependency manifest and installer checks. The web/server builds never import Electron code.
 
 ## Physical USB release gate
 

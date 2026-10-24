@@ -6,7 +6,7 @@ Turn HiDock recordings and imported audio into searchable transcripts, meeting n
 
 HiDockNotes is a private recording library you can host on your own server. Open it as a website or install the same interface as a PWA. Sync a HiDock directly from desktop Chrome or Edge, upload existing audio, and access your transcripts, meeting notes, tasks and Assistant from any device. Audio storage, CPU transcription and optional semantic search run on the server. ChatGPT plan and API connections can generate summaries and source-linked answers.
 
-The desktop application can connect to the hosted library while using native USB on your computer, or keep using its separate local library. The website/PWA needs no Electron runtime or native helper. Physical browser/PWA USB validation remains pending.
+The desktop application is a server-only client with native USB transport on your computer. Recordings, transcripts, settings, AI accounts, models and processing live on the Docker server. A running server is required; the desktop has no local-library fallback. The website/PWA needs no Electron runtime or native helper. Physical browser/PWA USB validation remains pending.
 
 **[Download the latest release](https://github.com/Amitai5/HiDockNotes/releases/latest)** · [Release history](https://github.com/Amitai5/HiDockNotes/releases) · [Report an issue](https://github.com/Amitai5/HiDockNotes/issues)
 
@@ -16,7 +16,7 @@ The desktop application can connect to the hosted library while using native USB
 | --- | --- |
 | Recorder sync and audio import | Download recordings from a HiDock over USB, or import existing audio without a recorder. Downloads are checked for completeness and verified with SHA-256. |
 | Searchable library | Organize recordings into project folders, add tags, and search titles, transcripts, and summaries. Filter by project, date, or processing status. |
-| Local transcription | Transcribe with Whisper on your CPU, with timestamps and speaker labels. Choose Base for speed or Small for higher accuracy. |
+| Server transcription | Transcribe with Whisper on your server CPU, with timestamps and speaker labels. Choose Base for speed or Small for higher accuracy. |
 | Meeting notes | Generate a title, meeting type, participants, tags, discussion summary, decisions, open questions, risks, and next steps. |
 | Remembered voices | Name speakers, save clean voice samples locally, and manage people and samples from a compact list and detail panel. |
 | Actionables | Track tasks with owners, due dates, completion history, and links back to their source moments. |
@@ -26,7 +26,7 @@ The desktop application can connect to the hosted library while using native USB
 | Calendar-linked meetings | Connect a Google Calendar private iCal feed and link matching events, agendas, and invitees to recordings. |
 | Transcript corrections | Edit text, restore earlier versions, and compare a new transcription before replacing corrected work. |
 | Export and recovery | Export notes, subtitles, and playable audio; back up and restore the complete library. |
-| MCP access | Let an MCP-compatible agent search recordings by meaning and read notes, meeting outcomes, tasks, and saved reference context through a local, read-only connection. |
+| MCP access | Let an MCP-compatible agent search recordings by meaning and read notes, meeting outcomes, tasks, and saved reference context through the server’s authenticated, read-only HTTPS endpoint. |
 
 ## Install on TrueNAS or another Docker server
 
@@ -52,7 +52,7 @@ See the [self-hosting guide](docs/self-hosting.md) for dataset permissions, reso
 
 ## Desktop installers
 
-Open [the latest GitHub release](https://github.com/Amitai5/HiDockNotes/releases/latest), expand **Assets**, and choose the installer for your computer. The installers bundle the application runtime and audio conversion tools. To use the server library, open **Settings → General → Server connection**, enter your HTTPS server origin, and choose **Connect to server**. USB runs locally; storage and processing stay on the server. Use the native **Server** menu to change the connection or return to the local library.
+Open [the latest GitHub release](https://github.com/Amitai5/HiDockNotes/releases/latest), expand **Assets**, and choose the installer for your computer. The installers bundle a sandboxed Electron client and native USB transport. On first launch, enter your server’s HTTPS origin, such as `https://notes.amitai.tech`, and choose **Connect to server**, then sign in. Use **Server → Change server** to edit the address. If the server is unavailable, the app returns to the connection screen. The installer contains no local database, AI provider clients, speech/search models, FFmpeg, processing workers or MCP server.
 
 | Your computer | File to download | Installation |
 | --- | --- | --- |
@@ -68,7 +68,7 @@ HiDock P1 on Windows is the primary hardware target. CI builds and checks the pa
 
 ### Updating an existing installation
 
-Check **Settings → About → Application updates** for the latest release and its notes. Current unsigned builds use manual installer downloads. Create a library backup, close HiDockNotes, and install the newer release over the existing application. Signed in-app installation is prepared for releases with configured signing credentials; see the [update guide](docs/backup-transcripts-updates.md#in-app-updates).
+Update the Docker image for application features and processing fixes. Update the desktop transport by closing the app and installing the newer desktop release over it. Existing local library files from older versions are preserved but never opened by the new client. Before migrating an old local library, use version 0.15.4 or earlier to create a complete backup, then restore it through the server’s Settings. See the [migration guide](docs/self-hosting.md#backups-migration-and-recovery).
 
 ## First-time setup
 
@@ -181,7 +181,7 @@ After restore, AI accounts and calendar feeds are disconnected, MCP access and o
 
 The server encrypts API keys, ChatGPT sessions and private calendar links with its persistent server key. The library database, audio files, and backup archives are not encrypted by HiDockNotes. Provider data handling and usage policies apply to anything you send to a cloud service.
 
-Server metadata lives in `/data/data/library.db`; audio lives under the persistent `/data` volume. Manage those paths through Docker volumes. Use a complete backup to move or recover a library. The desktop fallback retains its original local storage settings.
+Server metadata lives in `/data/data/library.db`; audio lives under the persistent `/data` volume. Manage those paths through Docker volumes. Use a complete backup to move or recover a library. The desktop retains only its chosen server address, browser session/cache and temporary USB upload staging; completed uploads are removed from staging. It does not create or open a local library database or model cache. Existing legacy library files are left untouched.
 
 ### Delete a recording
 
@@ -208,7 +208,7 @@ Deletion removes that recording's audio, transcript, summary, action items, tags
 
 Meaning search uses the model enabled in **Settings → AI**; MCP reads never download it automatically. If it is unavailable, results explicitly report keyword fallback. Outcome kinds are `decision`, `open_question`, `risk`, and `next_step`; date filters use inclusive UTC recording dates (`from`/`to`, `YYYY-MM-DD`). Results identify transcript-backed versus older summary-derived entries and flag summaries made stale by transcript edits. See [MCP tool examples](docs/mcp-tools.md).
 
-The hosted MCP endpoint uses stateless Streamable HTTP. Turning access off revokes its tokens. Tools exclude audio, voice embeddings, credentials, arbitrary filesystem access and device operations. The legacy desktop app retains its local stdio launcher.
+The hosted MCP endpoint uses stateless Streamable HTTP. Turning access off revokes its tokens. Tools exclude audio, voice embeddings, credentials, arbitrary filesystem access and device operations. The desktop no longer runs a local stdio launcher. Replace old desktop MCP entries with the server HTTPS configuration.
 
 ## Troubleshooting
 
@@ -238,7 +238,7 @@ npm run build:web
 npm run start:web
 ```
 
-After building, `npm start` serves the website at `http://localhost:3000`. Use `npm run dev:web` for Vite development alongside the server. The desktop fallback uses `npm run build:desktop` and `npm run start:desktop`; `Launch.cmd` still opens that desktop build.
+After building, `npm start` serves the website at `http://localhost:3000`. Use `npm run dev:web` for Vite development alongside the server. The desktop client uses `npm run build:desktop` and `npm run start:desktop`; `Launch.cmd` opens that client and asks for a server address on first launch.
 
 ### Verify and package
 
@@ -256,13 +256,13 @@ npm run smoke:native
 | macOS, native Intel or Apple Silicon architecture | `npm run package:mac` |
 | Linux x64 | `npm run package:linux` |
 
-Packages are written to `release/<version>/`. Run `npm run smoke:package` after packaging to check the bundled SQLite/FTS, USB binding, speech runtime, ffmpeg, and required resources. These checks do not open a user library or connect a recorder.
+Packages are written to `release/<version>/`. Run `npm run smoke:package` after packaging to verify native USB, server setup, required resources, and the absence of local library/AI runtimes and worker bundles. Docker builds and container smoke tests verify SQLite/FTS, speech, search CPU inference, calendar and FFmpeg on the server. These checks do not open a user library or connect a recorder.
 
 ### Release workflow
 
 [Build apps, Docker image and release](https://github.com/Amitai5/HiDockNotes/actions/workflows/release.yml) runs on pushes to `production` and supports manual runs from that branch. For a new version, use `npm run release:version -- 0.13.1` as an example, run `npm run release:check`, then commit and push the intended changes. Choose an unpublished version; existing public versions are skipped.
 
-The workflow typechecks, lints, runs the complete test suite, and compiles the Vite application once. Four parallel packaging jobs reuse that exact commit's compiled output, install native dependencies on their own Windows/Linux/macOS runners, and check real CPU inference before and after packaging. npm downloads and per-platform Electron, FFmpeg and packaging tools are cached; installers omit unused ONNX platforms and architectures. Intel Mac support uses a pinned compatible ONNX runtime.
+The workflow typechecks, lints, runs the complete test suite, and compiles the Vite application once. Four parallel packaging jobs reuse that exact commit's compiled output, install native USB on their own Windows/Linux/macOS runners, and check that installers contain only the server client. npm downloads and per-platform Electron and packaging tools are cached. Native processing and real CPU inference checks run in the Docker image.
 
 The workflow tests and packages Windows x64, Linux x64, Intel Mac, and Apple Silicon Mac separately. After all four builds, packaged checks, and the container smoke test succeed, it publishes the five installers, web/PWA archive, Compose file, Docker image metadata and `SHA256SUMS.txt` to a GitHub release tagged at the tested commit. Signing and notarization configuration is documented in the [release signing guide](docs/backup-transcripts-updates.md#configure-signed-releases).
 
@@ -270,10 +270,10 @@ The workflow tests and packages Windows x64, Linux x64, Intel Mac, and Apple Sil
 
 The website/PWA lives in `apps/web`, the Fastify server in `apps/server`, and shared domain/storage/processing code in `packages/core`. See [self-hosting](docs/self-hosting.md) for web development and Docker builds.
 
-The legacy desktop fallback uses Electron, strict TypeScript, React, and Tailwind provide the desktop app. The main process owns SQLite and USB access; utility processes handle audio, local text embeddings, and calendar parsing. The sandboxed renderer uses a typed, allowlisted preload bridge. Search combines SQLite FTS5 with optional local embeddings stored in SQLite. Speech and text embedding runtimes use separate workers.
+The desktop uses Electron and React for server setup, then loads the hosted interface in a sandboxed window. Its restricted preload exposes native USB only to the exact configured origin. The Docker server owns SQLite/FTS, audio conversion, isolated speech/search workers, provider credentials, calendars and MCP. Retained legacy desktop sources are unbundled references; explicit build inputs and installer checks prevent them from shipping.
 
-- `apps/electron/src` — interface and shared contracts.
-- `apps/electron/electron` — main process, preload, device services, and processing worker.
+- `apps/electron/src/server.tsx` — server connection screen.
+- `apps/electron/electron/main/hosted-client.ts` — server window and native USB transport boundary.
 - `packages/jensen-protocol` — adapted HiDock device protocol.
 - `scripts/release` — versioning, packaging checks, signing, and publication.
 

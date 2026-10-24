@@ -5,13 +5,13 @@ const path = require('node:path')
 const { createRequire } = require('node:module')
 const { root } = require('./version.cjs')
 
-const load = createRequire(path.join(root, 'apps/electron/package.json'))
+const load = createRequire(path.join(root, 'packages/core/package.json'))
 const searchLoad = createRequire(load.resolve('@huggingface/transformers'))
 const runtime = path.dirname(searchLoad.resolve('onnxruntime-node/package.json'))
 const version = searchLoad('onnxruntime-node/package.json').version
 
 // Inspect the installed package, not a hardcoded version allowlist: a future
-// dependency update must still supply native CPU binaries for every installer.
+// dependency update must still supply native CPU binaries for the server runtime.
 for (const [platform, arch, library] of [
   ['win32', 'x64', 'onnxruntime.dll'],
   ['linux', 'x64', 'libonnxruntime.so.1'],
