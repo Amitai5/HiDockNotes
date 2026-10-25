@@ -2,23 +2,27 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, open, rename, stat, unlink } from 'node:fs/promises'
 import { join, basename, extname } from 'node:path'
 import type { FastifyInstance } from 'fastify'
-import { hashFile } from '@hidock/core/services/file-verification'
+import { hashFile, hasVerifiedCopy } from '@hidock/core/services/file-verification'
 import { queryAll, queryOne, run, runInTransaction, markRecordingDownloaded, markRecordingVerified, remeasureRecordingDuration } from '@hidock/core/services/database'
-interface Upload { id: string; filename: string; size: number; offset: number; checksum: string; serial: string | null; device_filename: string | null; recorded_at: string; state: string; recording_id: string | null }
+interface Upload { id: string; filename: string; size: number; offset: number; checksum: string; serial: string | null; device_filename: string | null; recorded_at: string; state: string; recording_id: string | null; project_id: string | null; request_id: string | null }
 const CHUNK = 1024 * 1024
 export async function registerUploads(app: FastifyInstance, dataPath: string, ready: (id: string) => void): Promise<void> {
   const folder = join(dataPath, 'uploads'), recordings = join(dataPath, 'recordings'); await mkdir(folder, { recursive: true }); await mkdir(recordings, { recursive: true })
   const busy = new Set<string>()
   const locked = async <T>(id: string, action: () => Promise<T>): Promise<T> => { if (busy.has(id)) throw new Error('This upload is busy. Retry its current offset.'); busy.add(id); try { return await action() } finally { busy.delete(id) } }
   const get = (id: string): Upload => { if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('Invalid upload ID.'); const item = queryOne<Upload>('SELECT * FROM server_uploads WHERE id=?', [id]); if (!item) throw new Error('Upload not found.'); return item }
-  app.post<{ Body: { filename: string; size: number; checksum: string; serial?: string; deviceFilename?: string; recordedAt?: string } }>('/api/v1/uploads', async request => {
+  app.post<{ Body: { filename: string; size: number; checksum: string; serial?: string; deviceFilename?: string; recordedAt?: string; projectId?: string | null; requestId?: string } }>('/api/v1/uploads', async request => {
     const value = request.body
     if (!value || typeof value.filename !== 'string' || basename(value.filename) !== value.filename || !/\.(wav|hda|mp3|m4a|mp4|webm|ogg|flac|aac|opus)$/i.test(value.filename) || value.filename.length > 200 || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > 2 * 1024 ** 3 || !/^[a-f0-9]{64}$/.test(value.checksum)) throw new Error('Choose an audio file up to 2 GB with a SHA-256 checksum.')
     if (value.serial !== undefined && (typeof value.serial !== 'string' || !/^[\w-]{1,100}$/.test(value.serial) || value.deviceFilename !== value.filename)) throw new Error('Invalid recorder identity.')
+    const projectId=value.projectId??null
+    if(projectId!==null&&(typeof projectId!=='string'||!/^[a-zA-Z0-9_-]{1,80}$/.test(projectId)||!queryOne('SELECT id FROM projects WHERE id=?',[projectId])))throw Error('The destination project no longer exists. Choose another project.')
+    if(value.requestId!==undefined&&(typeof value.requestId!=='string'||!/^[a-f0-9-]{36}$/i.test(value.requestId)))throw Error('Invalid upload request identity.')
+    if(value.requestId){const existing=queryOne<Upload>('SELECT * FROM server_uploads WHERE request_id=?',[value.requestId]);if(existing){if(existing.project_id!==projectId||existing.checksum!==value.checksum||existing.size!==value.size||existing.filename!==value.filename||existing.serial!==(value.serial??null))throw Error('This upload request was already used for another destination or file.');return existing}}
     const recorded = value.recordedAt ? new Date(value.recordedAt) : new Date(); if (!Number.isFinite(recorded.getTime())) throw new Error('Invalid recording date.')
-    const previous = queryOne<Upload>("SELECT * FROM server_uploads WHERE checksum=? AND size=? AND coalesce(serial,'')=? AND filename=? AND state IN ('uploading','completed') ORDER BY created_at DESC LIMIT 1", [value.checksum, value.size, value.serial ?? '', value.filename]); if (previous) return previous
+    const previous = queryOne<Upload>("SELECT * FROM server_uploads WHERE checksum=? AND size=? AND coalesce(serial,'')=? AND filename=? AND coalesce(project_id,'')=? AND state IN ('uploading','completed') ORDER BY created_at DESC LIMIT 1", [value.checksum, value.size, value.serial ?? '', value.filename, projectId??'']); if (previous) return previous
     const id = randomUUID(); const file = await open(join(folder, id), 'wx', 0o600); await file.close()
-    run('INSERT INTO server_uploads(id,filename,size,checksum,serial,device_filename,recorded_at,created_at) VALUES (?,?,?,?,?,?,?,?)', [id, value.filename, value.size, value.checksum, value.serial ?? null, value.deviceFilename ?? null, recorded.toISOString(), Date.now()]); return get(id)
+    run('INSERT INTO server_uploads(id,filename,size,checksum,serial,device_filename,recorded_at,created_at,project_id,request_id) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, value.filename, value.size, value.checksum, value.serial ?? null, value.deviceFilename ?? null, recorded.toISOString(), Date.now(), projectId, value.requestId??null]); return get(id)
   })
   app.get<{ Params: { id: string } }>('/api/v1/uploads/:id', async request => get(request.params.id))
   app.put<{ Params: { id: string }; Querystring: { offset: string }; Body: Buffer }>('/api/v1/uploads/:id', { bodyLimit: CHUNK }, async (request, reply) => locked(request.params.id, async () => {
@@ -29,16 +33,24 @@ export async function registerUploads(app: FastifyInstance, dataPath: string, re
   }))
   app.post<{ Params: { id: string } }>('/api/v1/uploads/:id/complete', async request => locked(request.params.id, async () => {
     const value = get(request.params.id); if (value.state === 'completed') return value
+    if(value.project_id!==null&&!queryOne('SELECT id FROM projects WHERE id=?',[value.project_id]))throw Error('The upload destination project was deleted. Choose a new destination and import again.')
     if (value.offset !== value.size) throw new Error('Upload the complete audio before finishing.')
     const filename = value.id + extname(value.filename).toLowerCase(), destination = join(recordings, filename), staged = join(folder, value.id)
     const source = await stat(destination).then(() => destination).catch(() => staged)
     if (await hashFile(source) !== value.checksum) { run("UPDATE server_uploads SET state='failed' WHERE id=?", [value.id]); throw new Error('The uploaded audio checksum does not match. Start a new upload.') }
     if (source !== destination) await rename(source, destination)
-    const id = runInTransaction(() => { const id = markRecordingDownloaded(filename, destination, { fileSize: value.size, dateRecorded: value.recorded_at }); markRecordingVerified(filename, value.checksum, value.serial); run('UPDATE recordings SET title=coalesce(title,?),title_source=coalesce(title_source,?) WHERE id=?', [value.filename, 'manual', id]); remeasureRecordingDuration(id); run("UPDATE server_uploads SET state='completed',recording_id=? WHERE id=?", [id, value.id]); return id })
+    const id = runInTransaction(() => { if(value.project_id!==null&&!queryOne('SELECT id FROM projects WHERE id=?',[value.project_id]))throw Error('The upload destination project was deleted. Choose a new destination and import again.'); const id = markRecordingDownloaded(filename, destination, { fileSize: value.size, dateRecorded: value.recorded_at }); run('UPDATE recordings SET project_id=? WHERE id=?',[value.project_id,id]); markRecordingVerified(filename, value.checksum, value.serial); run('UPDATE recordings SET title=coalesce(title,?),title_source=coalesce(title_source,?) WHERE id=?', [value.filename, 'manual', id]); remeasureRecordingDuration(id); run("UPDATE server_uploads SET state='completed',recording_id=? WHERE id=?", [id, value.id]); return id })
     ready(id); return get(value.id)
   }))
   app.delete<{ Params: { id: string } }>('/api/v1/uploads/:id', async request => locked(request.params.id, async () => { const value = get(request.params.id); if (value.state === 'completed') throw new Error('Delete the recording from the library.'); await unlink(join(folder, value.id)).catch(error => { if (error.code !== 'ENOENT') throw error }); run('DELETE FROM server_uploads WHERE id=?', [value.id]); return { ok: true } }))
   app.get<{ Querystring: { serial: string } }>('/api/v1/device/manifest', async request => ({ recordings: queryAll('SELECT device_filename AS filename,size,checksum,recording_id AS recordingId FROM server_uploads WHERE serial=? AND state=\'completed\' AND recording_id IN (SELECT id FROM recordings WHERE verified=1)', [request.query.serial]), commands: queryAll("SELECT * FROM server_device_commands WHERE serial=? AND state='pending'", [request.query.serial]) }))
+  app.post<{ Body: { serial: string; filename: string; size: number; checksum: string } }>('/api/v1/device/verify-copy', async request => {
+    const value = request.body
+    if (!value || typeof value.serial !== 'string' || !/^[\w-]{1,100}$/.test(value.serial) || typeof value.filename !== 'string' || basename(value.filename) !== value.filename || !Number.isSafeInteger(value.size) || value.size < 1 || typeof value.checksum !== 'string' || !/^[a-f0-9]{64}$/.test(value.checksum)) throw new Error('Invalid recorder file identity.')
+    const saved = queryOne<{ filename: string; recording_id: string }>("SELECT r.filename,u.recording_id FROM server_uploads u JOIN recordings r ON r.id=u.recording_id WHERE u.serial=? AND u.device_filename=? AND u.size=? AND u.checksum=? AND u.state='completed' AND u.recording_id NOT IN (SELECT recording_id FROM recording_deletions)", [value.serial, value.filename, value.size, value.checksum])
+    if (!saved || !await hasVerifiedCopy(saved.filename, value.size, value.serial) || !queryOne('SELECT id FROM recordings WHERE id=? AND verified=1 AND checksum=?', [saved.recording_id, value.checksum])) throw new Error('A matching verified server copy is required. The device recording was kept.')
+    return { verified: true }
+  })
   app.post<{ Params: { id: string }; Body: { serial: string; checksum: string } }>('/api/v1/device/commands/:id/ack', async request => { const result = run("UPDATE server_device_commands SET state='completed' WHERE id=? AND serial=? AND checksum=?", [request.params.id, request.body.serial, request.body.checksum]); if (!result.changes) throw new Error('Device cleanup did not match.'); return { ok: true } })
   // Crash-interrupted capture prefixes remain explicitly marked until the owner finalizes them.
   run("UPDATE server_captures SET state='interrupted' WHERE state='recording'")

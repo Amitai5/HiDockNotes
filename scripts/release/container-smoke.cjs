@@ -29,6 +29,11 @@ async function main() {
         const complete = (url,requestHeaders=headers) => fetch(base+'/api/v1/chatgpt/callback',{method:'POST',headers:requestHeaders,body:JSON.stringify({url})});
         assert.equal((await complete('http://127.0.0.1:1455/auth/callback?code=unused&state=unused',{origin,'content-type':'application/json'})).status,401);
         assert.equal((await fetch(base+'/auth/callback?code=unused&state=unused')).status,404);
+        const parallel = await (await command('ai:settings',[{maxConcurrentTranscriptions:2,maxConcurrentSummaries:3}])).json();
+        assert.equal(parallel.result.settings.maxConcurrentTranscriptions,2); assert.equal(parallel.result.settings.maxConcurrentSummaries,3);
+        assert.ok(Array.isArray(parallel.result.queue.activeJobs));
+        assert.equal((await command('ai:settings',[{maxConcurrentTranscriptions:0}])).status,400);
+        assert.equal((await command('ai:settings',[{maxConcurrentSummaries:9}])).status,400);
         assert.equal((await command('chatgpt:sign-in',[null])).status,200);
         assert.equal((await complete('http://127.0.0.1:1455/auth/callback?code=unused&state=wrong')).status,400);
         assert.equal((await complete('http://untrusted.test/auth/callback?code=unused&state=unused')).status,400);

@@ -9,7 +9,7 @@ describe('Assistant source workspace', () => {
   it('resizes the source pane with the keyboard and leaves chat mounted when it closes', () => {
     const chat = <textarea aria-label="Draft" defaultValue="Keep this draft" />
     const view = render(<AssistantWorkspace chat={chat} source={<aside>Source</aside>} />)
-    const input = screen.getByLabelText('Draft'), separator = screen.getByRole('separator', { name: 'Resize recording source panel' })
+    const input = screen.getByLabelText('Draft'), separator = screen.getByRole('separator', { name: 'Resize source panel' })
     fireEvent.keyDown(separator, { key: 'ArrowLeft' })
     expect(separator).toHaveAttribute('aria-valuenow', '390')
     fireEvent.keyDown(separator, { key: 'Home' })

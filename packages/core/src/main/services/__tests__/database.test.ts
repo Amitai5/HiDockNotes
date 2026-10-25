@@ -27,8 +27,9 @@ describe('recording database', () => {
     expect(() => listRecordings('" OR *')).not.toThrow()
   })
   it('preserves settings and project membership', () => {
-    saveSettings({ name: 'Dana', autoDownload: false })
-    expect(getSettings('/recordings')).toMatchObject({ name: 'Dana', autoDownload: false, recordingsPath: '/recordings' })
+    expect(getSettings('/recordings').autoDeleteFromDevice).toBe(false)
+    saveSettings({ name: 'Dana', autoDownload: false, autoDeleteFromDevice: true })
+    expect(getSettings('/recordings')).toMatchObject({ name: 'Dana', autoDownload: false, autoDeleteFromDevice: true, recordingsPath: '/recordings' })
     const project = createProject('Product interviews')
     expect(project).toMatchObject({ name: 'Product interviews', count: 0 })
   })

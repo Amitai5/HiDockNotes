@@ -53,7 +53,7 @@ export class ModelCache {
     const segmentation = join(this.folder, 'pyannote-segmentation-3.0.onnx')
     const embedding = join(this.folder, '3dspeaker-eres2net.onnx')
     if (!await valid(segmentation, MODEL_ASSETS.segmentation.modelSha256)) {
-      const archive = join(this.folder, 'segmentation.tar.bz2')
+      const archive = join(this.folder, 'segmentation-' + randomUUID() + '.tar.bz2')
       await this.download(MODEL_ASSETS.segmentation, archive, p => progress('Downloading speaker segmentation model…', p * 0.15), signal)
       const staging = join(this.folder, 'extract-' + randomUUID())
       await mkdir(staging)

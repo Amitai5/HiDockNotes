@@ -1,14 +1,15 @@
 import { appClient } from '../services/app-client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Clock3, FileText, LoaderCircle, Pause, Play, X } from 'lucide-react'
-import type { RecordingCitation } from '../shared/ai'
+import { NoteSourcePanel } from './NoteSourcePanel'
+import type { RecordingCitation, SourceCitation } from '../shared/ai'
 import type { RecordingDetail } from '../shared/contracts'
 import { Button, formatDuration } from './ui'
 import { MarkdownContent } from './MarkdownContent'
 import { speakerColors } from './SpeakerEditor'
 import { useRecordingPlayback } from '../hooks/useRecordingPlayback'
 
-export function AssistantSourcePanel({ citation, onClose }: { citation: RecordingCitation; onClose(): void }): JSX.Element {
+function RecordingSourcePanel({ citation, onClose }: { citation: RecordingCitation; onClose(): void }): JSX.Element {
   const [detail, setDetail] = useState<RecordingDetail | null>(null)
   const [error, setError] = useState<string | null>(null), [retry, setRetry] = useState(0)
   const [tab, setTab] = useState<'transcript' | 'summary'>('transcript')
@@ -54,3 +55,5 @@ export function AssistantSourcePanel({ citation, onClose }: { citation: Recordin
     </div>
   </aside>
 }
+
+export function AssistantSourcePanel({ citation, onClose }: { citation: SourceCitation; onClose(): void }): JSX.Element { return citation.kind === 'note' ? <NoteSourcePanel citation={citation} onClose={onClose} /> : <RecordingSourcePanel citation={citation} onClose={onClose} /> }

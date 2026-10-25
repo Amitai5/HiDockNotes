@@ -4,7 +4,7 @@ The server stores your library and runs processing. Open the same website from y
 
 ## Deploy the released image
 
-Use a TrueNAS installation with Docker-based Apps/Compose support and an x86-64 CPU. The initial configuration limits usage to 8 CPUs and 12 GB RAM, runs one processing job at a time, and limits speech inference to four threads. These are upper limits with no resource reservation. Integrated graphics are not required.
+Use a TrueNAS installation with Docker-based Apps/Compose support and an x86-64 CPU. The initial configuration limits usage to 8 CPUs and 12 GB RAM, defaults to one transcription and one summary at a time, and limits speech inference to four threads. These are upper limits with no resource reservation. Integrated graphics are not required.
 
 1. Create separate persistent datasets for the library and backup archives. Give the configured container UID/GID write permission. The example uses `1000:1000`; set `PUID`/`PGID` to the dataset owner if different.
 2. Download `compose.yaml` from the release and copy `.env.example` to `.env`.
@@ -76,7 +76,9 @@ Choose **Install** in the header or the browser's app-install menu to get a stan
 | Linux Chrome/Edge | Yes | WebUSB; the user needs permission to access the USB device |
 | Firefox, Safari, iPhone/iPad | Yes | Not supported; upload audio instead |
 
-Sync stages device audio in browser-owned temporary storage before sending it to the server. Memory is bounded, completed server uploads are checked with SHA-256, and browser staging is removed after successful import. HTTP transfers resume from committed offsets after interruption. A USB transfer interrupted before staging completes restarts from the recorder; arbitrary-offset USB resume is not assumed. The original recorder file is retained until you explicitly delete it.
+Sync stages device audio in browser-owned temporary storage before sending it to the server. Memory is bounded, completed server uploads are checked with SHA-256, and browser staging is removed after successful import. HTTP transfers resume from committed offsets after interruption. A USB transfer interrupted before staging completes restarts from the recorder; arbitrary-offset USB resume is not assumed. The original recorder file is retained until you explicitly delete it or enable **Delete from device after verified copy** in Sync or Settings → Device & storage. This option defaults to off and applies after each successful copy; the saved Library recording is kept. The server rechecks its saved size and SHA-256 checksum before device deletion. Device serial, filename, size, closed-file status and the current file signature are checked without downloading the audio again. Failed uploads, missing/corrupt server copies and changed or active device files are retained.
+
+The transfer bar appears above the device table. Both the bar and row percentages update during USB download and upload; server verification is shown as a separate stage. Turning **Auto-download new recordings** off cancels an automatic transfer and stops its remaining queue. Explicit downloads still work. The preference is checked again on refresh, reconnect and before each automatic file, and changes are sent to other open clients. Device deletion and deferred cleanup from a Library deletion issue the delete command directly and do not show a transfer bar. Auto-record is no longer exposed in Sync.
 
 The **Import audio** button accepts existing WAV, MP3, M4A/MP4, FLAC, Ogg/Opus, WebM, AAC, and HiDock HDA recordings. Uploads go to the server, not another client's local library. The website requires a server connection for private library data; the service worker caches only the app shell and static assets.
 
@@ -91,6 +93,10 @@ Use **Server → Change server** in the native menu to edit the address. A missi
 Server mode requires HTTPS for browser file staging, apart from localhost HTTP during development. Direct browser sync also needs HTTPS. The local HTTP Sync page offers **Open secure device sync** and disables unavailable USB/capture controls; server-side audio recovery remains available.
 
 ## AI and ChatGPT plan setup
+
+Choose an API or ChatGPT provider from the transcription/chat dropdown to open its connection dialog. Setup fields stay hidden until selected; **Manage connection** reopens a selected provider. Saved API keys remain encrypted and are never returned to the client.
+
+**Transcription → Parallel processing** has separate integer limits for simultaneous transcriptions (1–4) and summaries (1–8), defaulting to 1 each. Transcriptions and summaries use separate worker slots and can overlap. Each recording has at most one worker; summaries use the saved transcript and release the speech worker first. Lower limits affect the next starts and allow existing work to finish. Higher limits increase peak server memory and provider requests; Docker CPU/memory settings remain upper limits with no reservations. Waiting model preparation is shared across workers, and cancelling one recording does not stop another. Retry backoff, ChatGPT account invalidation, deletion and shutdown remain scoped to the affected work. Existing saved AI settings gain these defaults automatically.
 
 Local Whisper transcription and speaker processing run on the server CPU. Models download to `/data/models` when needed. Optional semantic search is off until you choose **Download & enable** in Settings. API keys, ChatGPT tokens and private calendar links are encrypted with `/data/secrets/server.key`.
 

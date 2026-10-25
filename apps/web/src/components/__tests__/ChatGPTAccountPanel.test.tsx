@@ -29,6 +29,8 @@ describe('subscription settings and consent UI', () => {
   function Harness(): JSX.Element { const [value, setValue] = useState(state); return <ChatGPTAccountPanel state={value} accept={setValue} /> }
   it('starts browser sign-in without an API key and shows the waiting state', async () => {
     render(<AISettingsPanel />)
+    fireEvent.change(await screen.findByLabelText('Chat provider'), { target: { value: 'chatgpt' } })
+    expect(await screen.findByRole('dialog', { name: 'ChatGPT connection' })).toBeVisible()
     fireEvent.click(await screen.findByRole('button', { name: 'Continue with ChatGPT' }))
     await screen.findByText('Complete sign-in in your browser…')
     expect(signIn).toHaveBeenCalledWith(null)

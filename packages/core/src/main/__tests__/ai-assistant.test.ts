@@ -46,7 +46,7 @@ describe('recording Assistant with SQLite FTS sources', () => {
     const chat = vi.fn().mockResolvedValue('Both budgets were reviewed. [1] [2]')
     await new RecordingAssistant(vault, () => ({ chat } as unknown as ProviderClient)).ask('Budget?', null, [])
     const content = chat.mock.calls[0][2] as string
-    const reference = JSON.parse(content.slice(content.indexOf('\n') + 1, content.indexOf('\n\nRECORDING EXCERPTS')))
+    const reference = JSON.parse(content.slice(content.indexOf('\n') + 1, content.indexOf('\n\nLIBRARY SOURCE EXCERPTS')))
     expect(reference.projects).toEqual(expect.arrayContaining([expect.objectContaining({ id: first.id, recordingIds: [firstId] }), expect.objectContaining({ id: second.id, recordingIds: [secondId] })]))
     expect(content).not.toContain('Unrelated background')
   })

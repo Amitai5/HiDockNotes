@@ -13,4 +13,4 @@ export const useAppStore = create<AppState>(set => ({
   clearActivity: () => set({ activity: [] }), setActivityOpen: activityOpen => set({ activityOpen }), setError: error => set({ error })
 }))
 export function reportError(error: unknown): void { useAppStore.getState().setError(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'The operation could not be completed.') }
-export async function updateSettings(patch: Partial<Pick<AppSettings, 'name' | 'autoConnect' | 'autoDownload' | 'appearance'>>): Promise<boolean> { try { useAppStore.getState().setSettings(await appClient.settings.update(patch)); return true } catch (error) { reportError(error); return false } }
+export async function updateSettings(patch: Partial<Pick<AppSettings, 'name' | 'autoConnect' | 'autoDownload' | 'autoDeleteFromDevice' | 'appearance'>>): Promise<boolean> { try { useAppStore.getState().setSettings(await appClient.settings.update(patch)); return true } catch (error) { reportError(error); return false } }

@@ -1,7 +1,7 @@
 import { BrowserControls } from './components/BrowserControls'
 import { useEffect } from 'react'
-import { HashRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, BookOpen, CheckSquare, MessageSquare, Search, Settings, Usb, X } from 'lucide-react'
+import { createHashRouter, RouterProvider, Navigate, Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Activity, BookOpen, CheckSquare, MessageSquare, Menu, Search, Settings, Usb, X } from 'lucide-react'
 import product from '../product.json'
 import { useDevicePipeline } from './hooks/useDevicePipeline'
 import { useDeviceSubscriptions } from './hooks/useDeviceSubscriptions'
@@ -17,6 +17,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { AssistantPage } from './pages/AssistantPage'
 import { ResizableNavigation } from './components/ResizableNavigation'
 import { BrandMark } from './components/BrandMark'
+import { CreateProjectFolder } from './components/CreateProjectFolder'
 
 const sections = [
   { label: 'Knowledge', items: [{ label: 'Library', path: '/library', Icon: BookOpen }, { label: 'Actionables', path: '/actionables', Icon: CheckSquare }, { label: 'Assistant', path: '/assistant', Icon: MessageSquare }] },
@@ -44,11 +45,12 @@ function Shell(): JSX.Element {
     return () => match.removeEventListener('change', apply)
   }, [settings?.appearance])
   return <ResizableNavigation>
-    <header className="titlebar"><div className="brand"><BrandMark /><span>{product.name}</span></div><form className="global-search input-with-icon" onSubmit={e => { e.preventDefault(); navigate('/library') }}><Search size={17} /><input aria-label="Search your recordings" placeholder="Search your recordings" value={search} onChange={e => { setSearch(e.target.value); if (e.target.value) navigate('/library') }} /><kbd>Enter</kbd></form><div className={`device-chip ${connected ? 'connected' : ''}`}><span />{modelName(device.state.device?.model)} <b>·</b> {connected ? 'Connected' : 'Disconnected'}</div><button className="activity-trigger" onClick={() => setActivityOpen(true)}><Activity size={17} className={active ? 'pulse-accent' : ''} /><span>Activity</span></button><BrowserControls /></header>
+    <header className="titlebar"><div className="brand"><BrandMark /><span>{product.name}</span></div><details className="mobile-navigation"><summary aria-label="Open navigation"><Menu size={19} /></summary><nav aria-label="Mobile navigation">{sections.flatMap(section => section.items).map(({ label, path, Icon }) => <Link key={path} to={path} onClick={event => event.currentTarget.closest('details')?.removeAttribute('open')}><Icon size={16} />{label}</Link>)}<CreateProjectFolder /></nav></details><form className="global-search input-with-icon" onSubmit={e => { e.preventDefault(); navigate('/library') }}><Search size={17} /><input aria-label="Search your library" placeholder="Search your library" value={search} onChange={e => { setSearch(e.target.value); if (e.target.value) navigate('/library') }} /><kbd>Enter</kbd></form><div className={`device-chip ${connected ? 'connected' : ''}`}><span />{modelName(device.state.device?.model)} <b>·</b> {connected ? 'Connected' : 'Disconnected'}</div><button className="activity-trigger" onClick={() => setActivityOpen(true)}><Activity size={17} className={active ? 'pulse-accent' : ''} /><span>Activity</span></button><BrowserControls /></header>
     <aside className="sidebar" id="navigation-sidebar" aria-label="Main navigation"><nav>{sections.map(section => <div className="nav-section" key={section.label}><p>{section.label}</p>{section.items.map(({ label, path, Icon }) => path === '/library' ? <LibrarySidebar key={path} /> : <NavLink key={path} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} to={path}><Icon size={18} strokeWidth={1.7} /><span>{label}</span>{path === '/sync' && unsynced > 0 && <span className="nav-badge">{unsynced}</span>}</NavLink>)}</div>)}</nav></aside>
-    <main className={`main-content${location.pathname === '/assistant' ? ' assistant-content' : location.pathname.startsWith('/library/') ? ' recording-content' : ''}`}><Routes><Route path="/" element={<Navigate to="/library" replace />} /><Route path="/sync" element={<SyncPage device={device} />} /><Route path="/today" element={<Navigate to="/library" replace />} /><Route path="/assistant" element={<AssistantPage />} /><Route path="/library" element={<LibraryPage />} /><Route path="/library/:id" element={<RecordingPage />} /><Route path="/projects" element={<Navigate to="/library" replace />} /><Route path="/actionables" element={<ActionablesPage />} /><Route path="/settings" element={<SettingsPage />} /></Routes></main>
+    <main className={`main-content${location.pathname === '/assistant' ? ' assistant-content' : location.pathname.startsWith('/library/') ? ' recording-content' : location.pathname === '/library' || location.pathname.startsWith('/notes/') ? ' library-content' : ''}`}><Routes><Route path="/" element={<Navigate to="/library" replace />} /><Route path="/sync" element={<SyncPage device={device} />} /><Route path="/today" element={<Navigate to="/library" replace />} /><Route path="/assistant" element={<AssistantPage />} /><Route path="/library" element={<LibraryPage />} /><Route path="/notes/:noteId" element={<LibraryPage />} /><Route path="/library/:id" element={<RecordingPage />} /><Route path="/projects" element={<Navigate to="/library" replace />} /><Route path="/actionables" element={<ActionablesPage />} /><Route path="/settings" element={<SettingsPage />} /></Routes></main>
     {error && <div className="error-toast" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError(null)}><X size={16} /></button></div>}
     <ActivityLog />
   </ResizableNavigation>
 }
-export default function App(): JSX.Element { return <HashRouter><LibraryNavigationProvider><Shell /></LibraryNavigationProvider></HashRouter> }
+const router = createHashRouter([{ path: '*', element: <LibraryNavigationProvider><Shell /></LibraryNavigationProvider> }])
+export default function App(): JSX.Element { return <RouterProvider router={router} /> }

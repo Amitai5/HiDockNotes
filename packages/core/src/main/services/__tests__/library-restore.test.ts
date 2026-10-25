@@ -15,7 +15,9 @@ import { editTranscript, transcriptReview } from '../transcript-revisions'
 import { DEFAULT_AI_SETTINGS } from '../../../../src/shared/ai'
 import { readReferenceContext, saveReferenceContext } from '../reference-context'
 import { EMPTY_REFERENCE_CONTEXT } from '../../../../src/shared/reference-context'
-import { removeSchema12 } from './schema-fixtures'
+import {WrittenNotes} from '../written-notes'
+import {AssistantConversations} from '../assistant-conversations'
+import { removeSchema15, removeSchema12 } from './schema-fixtures'
 
 let root: string, data: string, archive: string, id: string, restore: LibraryRestoreService, backups: LibraryBackupService
 const audio = Buffer.from('fixture original audio, never a real recording'), date = '2026-10-20T10:00:00.000Z'
@@ -38,6 +40,29 @@ beforeEach(async () => {
 })
 afterEach(async () => { await restore.stop(); await backups.stop(); closeDatabase(); await rm(root, { recursive: true, force: true }) })
 describe('verified, recoverable library restore', () => {
+  it('restores a written-only library including formatted text, tags, project, history, context and source citations',async()=>{
+    run('DELETE FROM recordings')
+    const project=createProject('ColonyLaw'),notes=new WrittenNotes({changed:()=>undefined}),note=notes.create({requestId:'00000000-0000-4000-8000-000000000001',projectId:project.id,title:'Launch plan',document:{type:'doc',content:[{type:'taskList',content:[{type:'taskItem',attrs:{id:'task',checked:true},content:[{type:'paragraph',attrs:{id:'task-p'},content:[{type:'text',text:'Ship on Friday',marks:[{type:'bold'},{type:'link',attrs:{href:'https://example.com/launch'}}]}]}]}]}]},tags:['launch']})
+    notes.save(note.id,{title:'Launch notes',document:note.document,tags:note.tags,expectedRevision:1,mutationId:'00000000-0000-4000-8000-000000000002'})
+    saveReferenceContext(project.id,{...EMPTY_REFERENCE_CONTEXT,background:'Project launch context'},0)
+    const conversations=new AssistantConversations({changed:()=>undefined,answer:async()=>({text:'The note says to ship Friday. [1]',citations:[{kind:'note',number:1,noteId:note.id,revision:1,blockId:'task-p',heading:null,title:note.title,projectId:project.id,projectName:project.name,excerpt:'[x] Ship on Friday (https://example.com/launch)'}]})}),chat=conversations.create(project.id)
+    await conversations.send(chat.conversation.id,'Launch?',0);await conversations.stop();await backups.create(archive)
+    notes.remove(note.id,2,true)
+    const preview=await restore.prepare(archive);expect(preview).toMatchObject({localRecordings:0,writtenNotes:1,counts:{written_notes:1,written_note_versions:2,written_note_tags:1}})
+    await restore.schedule(preview!.id);closeDatabase();expect(applyPendingRestore(data)).toBe(true);initializeDatabase(join(data,'data/library.db'))
+    const restored=new WrittenNotes({changed:()=>undefined});expect(restored.get(note.id)).toMatchObject({title:'Launch notes',revision:2,projectId:project.id,tags:['launch']});expect(restored.get(note.id).document).toEqual(note.document);expect(restored.history(note.id)).toHaveLength(2);expect(restored.search({query:'Friday'}).hits[0].noteId).toBe(note.id)
+    expect(readReferenceContext(project.id).content.background).toBe('Project launch context');expect(conversations.get(chat.conversation.id).messages[1].citations[0]).toMatchObject({kind:'note',noteId:note.id,revision:1,blockId:'task-p'})
+  })
+  it('rejects malformed written documents before scheduling a restore',async()=>{
+    const notes=new WrittenNotes({changed:()=>undefined}),note=notes.create({requestId:'00000000-0000-4000-8000-000000000003',projectId:null})
+    run('UPDATE written_notes SET document_json=? WHERE id=?',[JSON.stringify({type:'doc',content:[{type:'script',text:'unsafe'}]}),note.id]);await backups.create(archive)
+    await expect(restore.prepare(archive)).rejects.toThrow('Unsupported');expect(existsSync(join(data,'data/restore-pending.json'))).toBe(false)
+  })
+  it('accepts schema 14 backups and adds empty note tables during upgrade',async()=>{
+    removeSchema15();getDatabase().pragma('user_version=14');await backups.create(archive)
+    const preview=await restore.prepare(archive);expect(preview?.writtenNotes).toBe(0);await restore.schedule(preview!.id);closeDatabase();applyPendingRestore(data);initializeDatabase(join(data,'data/library.db'))
+    expect(getDatabase().pragma('user_version',{simple:true})).toBe(DATABASE_SCHEMA_VERSION);expect(queryOne<{count:number}>('SELECT count(*) AS count FROM written_notes')?.count).toBe(0);expect(getDetail(id).recording.title).toBe('Archived meeting')
+  })
   it('previews all data and restores audio paths, voices, tasks, tags and transcript revisions without changing external originals', async () => {
     run("UPDATE recordings SET title='Current library to preserve'")
     const preview = await restore.prepare(archive)

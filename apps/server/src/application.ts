@@ -47,6 +47,9 @@ import { allowedOrigins } from './origins'
 import { registerChatGPTCallback } from './chatgpt-callback'
 import { digest, encryption, privateFile, secret, setupCode } from './security'
 import { registerUploads } from './uploads'
+import { validateLibraryScope, WrittenNotes } from '@hidock/core/services/written-notes'
+import { libraryContent } from '@hidock/core/services/library-content'
+import { registerNoteHandlers } from '@hidock/core/ipc/note-handlers'
 import product from '../product.json'
 
 export interface ServerOptions { dataPath: string; backupPath: string; origin: string; additionalOrigins?: readonly string[]; webPath?: string; secretPath?: string; logger?: boolean; processing?: boolean; onRestore?: () => void; setupLog?: (message: string) => void; chatgpt?: { request?: typeof fetch; callbackPort?: number } }
@@ -56,7 +59,7 @@ export async function createApplication(options: ServerOptions) {
   const dataPath = resolve(options.dataPath), backupPath = resolve(options.backupPath)
   for (const path of [dataPath, backupPath, join(dataPath, 'data'), join(dataPath, 'recordings')]) mkdirSync(path, { recursive: true, mode: 0o700 })
   configureDataPath(dataPath); applyPendingRestore(dataPath)
-  db.initializeDatabase(join(dataPath, 'data', 'library.db')); clearProcedures()
+  await db.backupBeforeDatabaseMigration(join(dataPath, 'data', 'library.db')); db.initializeDatabase(join(dataPath, 'data', 'library.db')); clearProcedures()
   configureSettingsReader(() => db.getSettings(join(dataPath, 'recordings')))
   const key = privateFile(options.secretPath ?? join(dataPath, 'secrets', 'server.key')), cipher = encryption(key)
   const setupFile = join(dataPath, 'secrets', 'setup-code')
@@ -83,13 +86,16 @@ export async function createApplication(options: ServerOptions) {
   const runner = new UtilityProcessingRunner(id => chatgpt.accessToken(id))
   const queue = new TranscriptionQueue({ vault, settings: readAISettings, dataPath, runner, changed, activity: emitActivityLog, reviewMode: db.queryOne<{ value: string }>("SELECT value FROM settings WHERE key='restore-review-required'")?.value === 'true', chatgpt })
   const search = new SemanticSearch({ dataPath, runner: new UtilityEmbeddingRunner(searchModelDirectory(dataPath)), changed: state => publish('semantic:state', state) })
+  const notes = new WrittenNotes({ changed: event => { publish('notes:changed', event); changed() } })
+  registerNoteHandlers(notes)
+  handle('library:content', async (options={}) => { const keywords=libraryContent(options);if(options.mode!=='meaning'||!options.query?.trim())return keywords;const meaning=await search.libraryMatches(options.query,validateLibraryScope(options.scope));return libraryContent(options,meaning) })
   const calendar = new CalendarService({ encryption: cipher, parse: parseCalendarInWorker, changed: () => publish('calendar:changed'), libraryChanged: changed })
   const providers = providerFactory(() => chatgpt.accessToken(), message => { const id = store.activeId(); if (id) chatgpt.block(id, message) }, () => chatgpt.sessionSignal(store.activeId()))
-  const conversations = registerAIHandlers(queue, vault, providers, changed, chatgpt, openBrowser, search, id => publish('conversations:changed', id))
+  const conversations = registerAIHandlers(queue, vault, providers, changed, chatgpt, openBrowser, search, id => publish('conversations:changed', id), notes)
   registerTranscriptHandlers(queue, changed); registerCalendarHandlers(calendar, async () => undefined); registerSemanticHandlers(search); registerReferenceContextHandlers(changed)
   handle('app:info', () => ({ name: product.name, version: product.version, runtime: process.version, platform: 'web' }))
   handle('settings:get', () => db.getSettings(join(dataPath, 'recordings')))
-  handle('settings:update', patch => { if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid settings.'); const value = patch as Record<string, unknown>; for (const [key, item] of Object.entries(value)) { if (key === 'name') validateText(item, 80); else if (key === 'autoConnect' || key === 'autoDownload') validateBoolean(item); else if (key === 'appearance') { if (!['light','dark','system'].includes(String(item))) throw new Error('Choose a valid appearance.') } else throw new Error('Unknown setting.') }; db.saveSettings(value); return db.getSettings(join(dataPath, 'recordings')) })
+  handle('settings:update', patch => { if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid settings.'); const value = patch as Record<string, unknown>; for (const [key, item] of Object.entries(value)) { if (key === 'name') validateText(item, 80); else if (key === 'autoConnect' || key === 'autoDownload' || key === 'autoDeleteFromDevice') validateBoolean(item); else if (key === 'appearance') { if (!['light','dark','system'].includes(String(item))) throw new Error('Choose a valid appearance.') } else throw new Error('Unknown setting.') }; db.saveSettings(value); const settings = db.getSettings(join(dataPath, 'recordings')); publish('settings:changed', settings); return settings })
   handle('library:list', (search = '', status = '') => db.listRecordings(validateText(search, 500), validateText(status, 40)))
   handle('library:detail', id => db.getDetail(validateId(id)))
   handle('library:navigation', () => db.libraryNavigation())
@@ -141,7 +147,7 @@ export async function createApplication(options: ServerOptions) {
   app.get<{ Params: { name: string } }>('/api/v1/backups/:name', async (request, reply) => { const name = request.params.name; if (basename(name) !== name || !/^HiDockNotes-[\w.:-]+\.tar\.gz$/.test(name)) return reply.code(404).send(); return reply.type('application/gzip').header('Content-Disposition', 'attachment; filename="' + name + '"').send(createReadStream(join(backupPath, name))) })
   // Restore archives are streamed separately, bypassing the bounded audio-chunk parser.
   app.register(async child => { child.removeContentTypeParser('application/octet-stream'); child.addContentTypeParser('application/octet-stream', (request, stream, done) => done(null, stream)); child.post('/api/v1/restore/archive', async request => { const path = join(dataPath, 'uploads', randomUUID() + '.tar.gz'); const fs = await import('node:fs'); const { pipeline } = await import('node:stream/promises'); try { let received = 0; async function* bounded() { for await (const part of request.body as Readable) { received += part.length; if (received > 20 * 1024 ** 3) throw new Error('Backups larger than 20 GB must be restored by the server administrator.'); yield part } }; await pipeline(Readable.from(bounded()), fs.createWriteStream(path, { flags: 'wx', mode: 0o600 })); return await restore.prepare(path) } finally { await unlink(path).catch(() => undefined) } }) })
-  const agentTools = new LibraryAgentTools({ all: db.queryAll, one: db.queryOne }, { referenceContext: readReferenceContext, meaningSearch: (query, project, signal) => search.agentMatches(query, project, signal) })
+  const agentTools = new LibraryAgentTools({ all: db.queryAll, one: db.queryOne }, { notes, noteMeaningSearch: (options,signal) => search.noteSearch(options,signal), referenceContext: readReferenceContext, meaningSearch: (query, project, signal) => search.agentMatches(query, project, signal) })
   const enabled = () => db.queryOne<{ value: string }>("SELECT value FROM settings WHERE key='agent-mcp-enabled'")?.value === 'true'
   const agentState = () => ({ enabled: enabled(), running: enabled(), error: null, tools: AGENT_TOOL_CATALOG.map(({ name, description }) => ({ name, description })), setup: { other: JSON.stringify({ mcpServers: { hidocknotes: { url: options.origin + '/api/v1/mcp', headers: { Authorization: 'Bearer <create a token below>' } } } }, null, 2), codex: '', claude: '' } })
   handle('agents:state', agentState); handle('agents:enabled', value => { db.run("INSERT OR REPLACE INTO settings VALUES ('agent-mcp-enabled',?)", [String(validateBoolean(value))]); if (!value) db.run('DELETE FROM server_tokens'); return agentState() })
@@ -149,7 +155,7 @@ export async function createApplication(options: ServerOptions) {
   app.post<{ Body: { jsonrpc: string; id?: string | number; method: string; params?: { name?: string; arguments?: unknown } } }>('/api/v1/mcp', async (request, reply) => {
     if (!enabled()) return reply.code(403).send({ error: 'MCP access is disabled.' }); const value = request.body; if (value?.jsonrpc !== '2.0' || typeof value.method !== 'string') return reply.code(400).send({ error: 'Invalid JSON-RPC request.' })
     if (value.method.startsWith('notifications/')) return reply.code(202).send()
-    try { const result = value.method === 'initialize' ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: product.name, version: product.version } } : value.method === 'ping' ? {} : value.method === 'tools/list' ? { tools: AGENT_TOOL_CATALOG.map(tool => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false } })) } : value.method === 'tools/call' ? { content: [{ type: 'text', text: JSON.stringify(await agentTools.call(value.params?.name ?? '', value.params?.arguments)) }] } : null; return result === null ? { jsonrpc: '2.0', id: value.id, error: { code: -32601, message: 'Method not found.' } } : { jsonrpc: '2.0', id: value.id, result } } catch { return { jsonrpc: '2.0', id: value.id, error: { code: -32602, message: 'Invalid tool arguments or unavailable data.' } } }
+    try { const result = value.method === 'initialize' ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: product.name, version: product.version } } : value.method === 'ping' ? {} : value.method === 'tools/list' ? { tools: AGENT_TOOL_CATALOG.map(tool => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false } })) } : value.method === 'tools/call' ? { content: [{ type: 'text', text: JSON.stringify(await agentTools.call(value.params?.name ?? '', value.params?.arguments)) }] } : null; return result === null ? { jsonrpc: '2.0', id: value.id, error: { code: -32601, message: 'Method not found.' } } : { jsonrpc: '2.0', id: value.id, result } } catch (error) { return { jsonrpc: '2.0', id: value.id, error: { code: -32602, message: error instanceof Error ? error.message.slice(0,400) : 'Invalid tool arguments or unavailable data.' } } }
   })
   if (options.webPath && existsSync(options.webPath)) { await app.register(staticFiles, { root: resolve(options.webPath), cacheControl: false }); app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/') || request.url.includes('.')) return reply.code(404).send({ error: 'Not found.' }); return reply.sendFile('index.html') }) }
   if (options.processing !== false) { queue.start(); calendar.start(); await search.initialize() }

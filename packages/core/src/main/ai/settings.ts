@@ -25,6 +25,11 @@ export function validateAISettings(value: unknown, current: AISettings = structu
     switch (key) {
       case 'transcription': result.transcription = selection(field, true); break
       case 'chat': result.chat = selection(field, false); break
+      case 'maxConcurrentTranscriptions': case 'maxConcurrentSummaries': {
+        const maximum = key === 'maxConcurrentTranscriptions' ? 4 : 8
+        if (typeof field !== 'number' || !Number.isInteger(field) || field < 1 || field > maximum) throw new Error(`Choose between 1 and ${maximum} simultaneous ${key === 'maxConcurrentTranscriptions' ? 'transcriptions' : 'summaries'}.`)
+        result[key] = field; break
+      }
       case 'autoTranscribe': if (typeof field !== 'boolean') throw new Error('Invalid automatic transcription setting.'); result.autoTranscribe = field; break
       case 'language': if (typeof field !== 'string' || (field !== 'auto' && !/^[a-z]{2,3}(-[a-zA-Z]{2,8})?$/.test(field))) throw new Error('Use auto or a language code, such as en or en-US.'); result.language = field; break
       case 'summaryTemplate': if (!['meeting', 'call', 'interview', 'dictation', 'custom'].includes(String(field))) throw new Error('Invalid summary template.'); result.summaryTemplate = field as AISettings['summaryTemplate']; break

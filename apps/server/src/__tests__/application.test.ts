@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -43,4 +43,13 @@ describe('hosted library boundaries',()=>{
     expect((await app.inject({url:'/api/v1/recordings/'+recording+'/audio',headers})).statusCode).toBe(409)
     expect((await rpc('library:waveform',[recording])).statusCode).toBe(400)
   })
+})
+
+describe('device verified-copy deletion boundary',()=>{
+  async function savedCopy() { const id=await upload('P1-original');await chunk(id,0,audio);const done=await app.inject({method:'POST',url:'/api/v1/uploads/'+id+'/complete',headers,payload:{}});return done.json().recording_id as string }
+  const verify=()=>app.inject({method:'POST',url:'/api/v1/device/verify-copy',headers,payload:{serial:'P1-original',filename:'meeting.wav',size:audio.length,checksum}})
+  it('verifies the saved bytes without uploading or changing the library',async()=>{await savedCopy();const result=await verify();expect(result.statusCode, result.body).toBe(200);expect(result.json()).toEqual({verified:true});expect((await rpc('library:list')).json().result).toHaveLength(1)})
+  it('rejects a missing or corrupt server copy even when its database row remains verified',async()=>{const id=await savedCopy(),row=queryOne<{file_path:string}>('SELECT file_path FROM recordings WHERE id=?',[id])!;const corrupt=Buffer.from(audio);corrupt[100]=1;await writeFile(row.file_path,corrupt);expect((await verify()).statusCode).toBe(400);await unlink(row.file_path);expect((await verify()).statusCode).toBe(400)})
+  it('requires the original recorder identity, file size and checksum',async()=>{await savedCopy();for(const patch of [{serial:'another'},{size:audio.length+1},{checksum:'b'.repeat(64)},{filename:'other.wav'}]){const response=await app.inject({method:'POST',url:'/api/v1/device/verify-copy',headers,payload:{serial:'P1-original',filename:'meeting.wav',size:audio.length,checksum,...patch}});expect(response.statusCode).toBe(400)}})
+  it('keeps automatic device deletion disabled by default and persists a strict boolean',async()=>{expect((await rpc('settings:get')).json().result.autoDeleteFromDevice).toBe(false);expect((await rpc('settings:update',[{autoDeleteFromDevice:true}])).json().result.autoDeleteFromDevice).toBe(true);expect((await rpc('settings:get')).json().result.autoDeleteFromDevice).toBe(true);expect((await rpc('settings:update',[{autoDeleteFromDevice:'true'}])).statusCode).toBe(400);expect((await rpc('settings:update',[{autoDeleteFromDevice:false}])).json().result.autoDeleteFromDevice).toBe(false)})
 })

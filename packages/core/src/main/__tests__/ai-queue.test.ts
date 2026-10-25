@@ -14,7 +14,7 @@ import { EMPTY_REFERENCE_CONTEXT } from '../../../src/shared/reference-context'
 
 const CLOUD_SETTINGS = { ...DEFAULT_AI_SETTINGS, transcription: { provider: 'gemini' as const, model: 'gemini-3.5-transcribe' } }
 
-describe('persistent single-recording processing queue', () => {
+describe('persistent processing queue', () => {
   let queue: TranscriptionQueue | null = null
   let vault: CredentialVault
   beforeEach(() => { initializeDatabase(':memory:'); vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-07T10:00:00Z')); vault = new CredentialVault({ isAvailable: () => true, encrypt: value => Buffer.from(value.split('').reverse().join('')), decrypt: value => value.toString().split('').reverse().join('') }) })
@@ -127,8 +127,9 @@ describe('persistent single-recording processing queue', () => {
     const state: ChatGPTState = { profiles: [], activeProfileId: 'account-one', connected: true, planEnabled: true, signingIn: false, error: null, welcomePending: false, models: [], offline: false, usageBlocked: false }
     const runner = { run: vi.fn().mockResolvedValue(result), stop: vi.fn().mockResolvedValue(undefined) }
     queue = new TranscriptionQueue({ vault, settings: () => ({ ...CLOUD_SETTINGS, chat: { provider: 'chatgpt', model: 'gpt-6.1-sol' } }), dataPath: '/local', runner, changed: vi.fn(), activity: vi.fn(), chatgpt: { state: () => state } })
-    queue.enqueue(id); await vi.advanceTimersByTimeAsync(1)
-    expect(runner.run.mock.calls[0][0]).toMatchObject({ chatgptProfileId: 'account-one', keys: { gemini: 'AQ.fake-key', openai: null } })
+    saveTranscript(id, result, CLOUD_SETTINGS)
+    queue.reprocess(id, 'summarize'); await vi.advanceTimersByTimeAsync(1)
+    expect(runner.run.mock.calls[0][0]).toMatchObject({ chatgptProfileId: 'account-one', keys: { gemini: null, openai: null } })
     expect(runner.run.mock.calls[0][0]).not.toHaveProperty('accessToken')
     expect(getDetail(id).recording.status).toBe('done')
   })
@@ -137,13 +138,14 @@ describe('persistent single-recording processing queue', () => {
     vault.saveVerified('gemini', 'AQ.fake-key', DEFAULT_MODELS.gemini)
     const state: ChatGPTState = { profiles: [], activeProfileId: 'account-one', connected: true, planEnabled: true, signingIn: false, error: null, welcomePending: false, models: [], offline: false, usageBlocked: false }
     const block = vi.fn((_id, message) => { state.usageBlocked = true; state.error = message })
-    const runner = { run: vi.fn().mockRejectedValueOnce(new ChatGPTPlanBlocked('Usage limit reached. Manage usage.')).mockResolvedValue({ ...result, segments: [] }), stop: vi.fn().mockResolvedValue(undefined) }
+    const runner = { run: vi.fn().mockRejectedValueOnce(new ChatGPTPlanBlocked('Usage limit reached. Manage usage.')).mockResolvedValue({ ...result, transcriptChanged: false }), stop: vi.fn().mockResolvedValue(undefined) }
     queue = new TranscriptionQueue({ vault, settings: () => ({ ...CLOUD_SETTINGS, chat: { provider: 'chatgpt', model: 'gpt-6.1-sol' } }), dataPath: '/local', runner, changed: vi.fn(), activity: vi.fn(), chatgpt: { state: () => state, block } })
-    queue.enqueue(first); queue.enqueue(second); await vi.advanceTimersByTimeAsync(30000)
+    saveTranscript(first, result, CLOUD_SETTINGS); saveTranscript(second, { ...result, segments: [{ ...result.segments[0], id: 'second-segment' }] }, CLOUD_SETTINGS)
+    queue.reprocess(first, 'summarize'); queue.reprocess(second, 'summarize'); await vi.advanceTimersByTimeAsync(30000)
     expect(runner.run).toHaveBeenCalledTimes(1)
     expect(getDetail(first).processing).toMatchObject({ stage: 'queued', attempt: 0 })
     expect(getDetail(second).recording.status).toBe('queued')
-    expect(queue.state()).toMatchObject({ ready: false, reason: 'Usage limit reached. Manage usage.' })
+    expect(queue.state()).toMatchObject({ ready: true, summaryReady: false, summaryReason: 'Usage limit reached. Manage usage.' })
     state.usageBlocked = false; state.error = null; queue.kick(); await vi.advanceTimersByTimeAsync(1)
     expect(runner.run.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(getDetail(first).recording.status).toBe('done')
@@ -155,7 +157,8 @@ describe('persistent single-recording processing queue', () => {
     let cancel: () => void = () => undefined
     const runner = { run: vi.fn((_input, observer: BackendObserver) => { observer.checkpoint(result); return new Promise<ProcessingResult>((_resolve, reject) => { cancel = () => reject(new ProcessingError('Cancelled')) }) }), stop: vi.fn(async () => cancel()) }
     queue = new TranscriptionQueue({ vault, settings: () => ({ ...CLOUD_SETTINGS, chat: { provider: 'chatgpt', model: 'gpt-6.1-sol' } }), dataPath: '/local', runner, changed: vi.fn(), activity: vi.fn(), chatgpt: { state: () => state } })
-    queue.enqueue(id); await vi.advanceTimersByTimeAsync(1)
+    saveTranscript(id, result, CLOUD_SETTINGS)
+    queue.reprocess(id, 'summarize'); await vi.advanceTimersByTimeAsync(1)
     queue.invalidateChatGPTSession('unrelated-account')
     expect(runner.stop).not.toHaveBeenCalled()
     state.connected = false; state.planEnabled = false
@@ -192,7 +195,7 @@ describe('persistent single-recording processing queue', () => {
     expect(getDetail(second).recording.queuePosition).toBe(1)
     releases[0](); await vi.advanceTimersByTimeAsync(1)
     releases[1](); await vi.advanceTimersByTimeAsync(1)
-    expect(q.state().queue).toEqual({ waiting: 0, waitingTranscriptions: 0, waitingSummaries: 0, reviewPaused: false, active: null })
+    expect(q.state().queue).toEqual({ waiting: 0, waitingTranscriptions: 0, waitingSummaries: 0, reviewPaused: false, active: null, activeJobs: [] })
   })
   it('recovers when reading settings during job preparation fails instead of leaving the active latch stuck', async () => {
     const id = recording(), runner = { run: vi.fn().mockResolvedValue({ ...result, summary: null }), stop: vi.fn().mockResolvedValue(undefined) }

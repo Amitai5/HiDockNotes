@@ -6,10 +6,10 @@ import { ProcessingError } from './errors'
 import { LocalWhisperProvider } from './local-whisper-provider'
 import { WhisperModelCache } from './whisper-model-cache'
 
-export function providerFactory(chatgptToken?: () => Promise<string>, blocked?: (message: string) => void, sessionSignal?: () => AbortSignal, localModelFolder?: string): ProviderFactory {
+export function providerFactory(chatgptToken?: () => Promise<string>, blocked?: (message: string) => void, sessionSignal?: () => AbortSignal, localModelFolder?: string, whisperCache?: Pick<WhisperModelCache, 'ensure'>): ProviderFactory {
   return (provider, key) => {
     if (provider === 'local') {
-      return new LocalWhisperProvider({ cache: localModelFolder ? new WhisperModelCache(localModelFolder) : { ensure: async () => { throw new ProcessingError('Local transcription must run in the recording worker.') } } })
+      return new LocalWhisperProvider({ cache: whisperCache ?? (localModelFolder ? new WhisperModelCache(localModelFolder) : { ensure: async () => { throw new ProcessingError('Local transcription must run in the recording worker.') } }) })
     }
     if (provider === 'chatgpt') {
       if (!chatgptToken) throw new ProcessingError('Connect your ChatGPT account in Settings before using your plan.')

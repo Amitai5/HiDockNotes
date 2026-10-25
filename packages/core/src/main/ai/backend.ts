@@ -35,7 +35,7 @@ function isPreflight(value: unknown): value is AudioPreflightReport {
 }
 
 export class LocalTranscriptionBackend implements TranscriptionBackend {
-  constructor(private readonly providers: ProviderFactory, private readonly diarize = diarizeRecording, private readonly models = (folder: string) => new ModelCache(folder), private readonly speech = detectSpeech) {}
+  constructor(private readonly providers: ProviderFactory, private readonly diarize = diarizeRecording, private readonly models: (folder: string) => Pick<ModelCache, 'ensure' | 'ensureSpeech'> = folder => new ModelCache(folder), private readonly speech = detectSpeech) {}
   async process(input: ProcessingInput, observer: BackendObserver, signal?: AbortSignal): Promise<ProcessingResult> {
     const { settings } = input
     const transcriptionKey = settings.transcription.provider === 'local' ? undefined : input.keys[settings.transcription.provider], chatKey = settings.chat.provider === 'chatgpt' ? undefined : input.keys[settings.chat.provider]

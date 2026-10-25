@@ -50,4 +50,18 @@ describe('AI settings and encrypted credentials', () => {
     expect(() => vault.saveVerified('openai', 'sk-fake', DEFAULT_MODELS.openai)).toThrow('key storage')
     expect(queryOne('SELECT * FROM provider_credentials')).toBeUndefined()
   })
+  it('defaults old persisted settings to one job per stage and persists independent limits', () => {
+    const legacy = { ...DEFAULT_AI_SETTINGS } as Record<string, unknown>
+    delete legacy.maxConcurrentTranscriptions; delete legacy.maxConcurrentSummaries
+    expect(validateAISettings(legacy)).toMatchObject({ maxConcurrentTranscriptions: 1, maxConcurrentSummaries: 1 })
+    updateAISettings({ maxConcurrentTranscriptions: 2, maxConcurrentSummaries: 4 })
+    expect(readAISettings()).toMatchObject({ maxConcurrentTranscriptions: 2, maxConcurrentSummaries: 4 })
+  })
+  it.each([0, -1, 1.5, NaN, Infinity, '2', null, 5])('rejects invalid transcription concurrency: %s', value => {
+    expect(() => validateAISettings({ maxConcurrentTranscriptions: value })).toThrow('between 1 and 4')
+  })
+  it.each([0, 1.5, 9, '2', null])('rejects invalid summary concurrency: %s', value => {
+    expect(() => validateAISettings({ maxConcurrentSummaries: value })).toThrow('between 1 and 8')
+  })
+
 })

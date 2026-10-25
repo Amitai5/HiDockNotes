@@ -2,7 +2,7 @@ let csrf = ''
 export function setCsrf(value: string): void { csrf = value }
 export const clientEvents = new EventTarget()
 let connection: EventSource | null = null
-const channels = ['library:changed','ai:changed','semantic:state','calendar:changed','conversations:changed','backup:state','restore:state','activity-log:entry','activity-log:cleared','browser:open','reconnected']
+const channels = ['notes:changed','settings:changed','library:changed','ai:changed','semantic:state','calendar:changed','conversations:changed','backup:state','restore:state','activity-log:entry','activity-log:cleared','browser:open','reconnected']
 export function connectEvents(): () => void {
   connection?.close(); const source = new EventSource('/api/v1/events'); connection = source
   for (const channel of channels) source.addEventListener(channel, event => clientEvents.dispatchEvent(new CustomEvent(channel, { detail: JSON.parse((event as MessageEvent).data) })))

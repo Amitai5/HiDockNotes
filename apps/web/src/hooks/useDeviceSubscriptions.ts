@@ -1,6 +1,8 @@
 import { desktopBridge } from '../services/desktop-recorder'
 import { USB_VENDOR_IDS } from '@hidock/jensen-protocol'
 import { appClient } from '../services/app-client'
+import { subscribe } from '../services/http'
+import type { AppSettings } from '../shared/contracts'
 // Adapted from sgeraldes/hidock-next-2 @ 31d44da (MIT).
 /** Device subscriptions. Downloads continue in the main process across navigation. */
 import { useEffect } from 'react'
@@ -17,6 +19,7 @@ export async function clearActivity(): Promise<void> { await appClient.activity.
 export function useDeviceSubscriptions(): void {
   useEffect(() => {
     const service = getHiDockDeviceService()
+    const removeSettings = subscribe<AppSettings>('settings:changed', settings => { browserDevice.applySettings(settings); useAppStore.getState().setSettings(settings) })
     const removeLocal = service.onActivity(entry => useAppStore.getState().addActivity(entry))
     const removeMain = appClient.activity.onEntry(entry => service.acceptActivity(entry))
     const removeCleared = appClient.activity.onCleared(clearAllActivityBuffers)
@@ -28,6 +31,6 @@ export function useDeviceSubscriptions(): void {
     const detached = (event: USBConnectionEvent) => { if (!USB_VENDOR_IDS.includes(event.device.vendorId)) return; void browserDevice.disconnect().catch(reportError) }
     const removeNative = desktopBridge()?.onDetached(() => { void browserDevice.disconnect().catch(reportError) })
     navigator.usb?.addEventListener('disconnect', detached)
-    return () => { mounted = false; clearInterval(interval); removeNative?.(); navigator.usb?.removeEventListener('disconnect', detached); removeLocal(); removeMain(); removeCleared() }
+    return () => { mounted = false; clearInterval(interval); removeNative?.(); navigator.usb?.removeEventListener('disconnect', detached); removeSettings(); removeLocal(); removeMain(); removeCleared() }
   }, [])
 }

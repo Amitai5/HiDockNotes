@@ -19,8 +19,8 @@ describe('global and project reference context', () => {
     saveReferenceContext(null, { ...EMPTY_REFERENCE_CONTEXT, terminology: 'Shared terminology' }, 0)
     saveReferenceContext(first.id, { ...EMPTY_REFERENCE_CONTEXT, background: 'Private first project background' }, 0)
     expect(readReferenceContext(second.id).content).toEqual(EMPTY_REFERENCE_CONTEXT)
-    expect(referenceContextSnapshot(null)).toEqual({ global: { ...EMPTY_REFERENCE_CONTEXT, terminology: 'Shared terminology' }, projects: [] })
-    expect(referenceContextSnapshot(first.id).projects).toEqual([{ id: first.id, name: 'First', recordingIds: [], content: { ...EMPTY_REFERENCE_CONTEXT, background: 'Private first project background' } }])
+    expect(referenceContextSnapshot(null)).toEqual({ global: { ...EMPTY_REFERENCE_CONTEXT, terminology: 'Shared terminology' }, globalVersion: 1, projects: [] })
+    expect(referenceContextSnapshot(first.id).projects).toEqual([{ id: first.id, name: 'First', recordingIds: [], version: 1, content: { ...EMPTY_REFERENCE_CONTEXT, background: 'Private first project background' } }])
   })
   it('rejects stale saves even after context has been cleared', () => {
     const saved = saveReferenceContext(null, { ...EMPTY_REFERENCE_CONTEXT, people: 'Dana Lee' }, 0)

@@ -49,7 +49,7 @@ export class LibraryRestoreService {
         if (db.pragma('integrity_check', { simple: true }) !== 'ok' || (db.pragma('foreign_key_check') as unknown[]).length) throw new Error('The backup database failed its integrity check.')
         validateDatabaseSchema(db)
         if (Number(db.pragma('user_version', { simple: true })) !== manifest.databaseSchema || manifest.databaseSchema < 10) throw new Error('The backup schema does not match its manifest or predates complete library backups.')
-        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'recording_fts_%'").all() as { name: string }[]
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'recording_fts_%' AND name NOT LIKE 'written_note_fts_%'").all() as { name: string }[]
         for (const { name } of tables) {
           const count = (db.prepare(`SELECT count(*) AS count FROM "${name.replaceAll('"', '""')}"`).get() as { count: number }).count
           if (manifest.counts[name] !== count) throw new Error('Backup metadata counts do not match the database.')
@@ -68,7 +68,7 @@ export class LibraryRestoreService {
         }
         if (seen.size !== rows.length + synced.length || manifest.files.some(file => file.path.startsWith('recordings/') && !references.has(file.path))) throw new Error('The backup audio roster is incomplete.')
         this.manifest = manifest
-        const preview: RestorePreview = { id: randomUUID(), fileName: basename(path), createdAt: manifest.createdAt, appVersion: manifest.appVersion, counts: manifest.counts, localRecordings: rows.filter(row => !!row.file_path).length, deviceOnly: rows.filter(row => !row.file_path).length, bytes: manifest.files.reduce((sum, file) => sum + file.bytes, 0), changedAudio: manifest.changedAudio }
+        const preview: RestorePreview = { id: randomUUID(), fileName: basename(path), createdAt: manifest.createdAt, appVersion: manifest.appVersion, counts: manifest.counts, localRecordings: rows.filter(row => !!row.file_path).length, deviceOnly: rows.filter(row => !row.file_path).length, writtenNotes: manifest.counts.written_notes ?? 0, bytes: manifest.files.reduce((sum, file) => sum + file.bytes, 0), changedAudio: manifest.changedAudio }
         this.publish({ phase: 'ready', preview, completedBytes: preview.bytes })
         return preview
       } finally { db.close() }
@@ -109,6 +109,8 @@ export class LibraryRestoreService {
           db.prepare('DELETE FROM server_captures').run()
         }
         db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES ('semantic-enabled','false')").run()
+        if(this.manifest!.databaseSchema>=15){db.prepare('DELETE FROM written_note_semantic_chunks').run();db.prepare('DELETE FROM written_note_semantic_documents').run();db.prepare('DELETE FROM written_note_fts').run();db.prepare('INSERT INTO written_note_fts(note_id,title,body) SELECT id,title,plain_text FROM written_notes').run()}
+        db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES ('autoDeleteFromDevice','false')").run()
         db.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES ('recordingsPath',?)").run(JSON.stringify(join(this.dependencies.dataPath, 'recordings')))
       })()
       db.pragma('wal_checkpoint(TRUNCATE)')

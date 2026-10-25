@@ -1,3 +1,4 @@
+import type {WrittenNotes} from '../services/written-notes'
 import { handle } from './trusted-ipc'
 import { validateBoolean, validateId, validateText } from './jensen-validation'
 import { providerId, updateAISettings } from '../ai/settings'
@@ -14,15 +15,15 @@ import { AssistantConversations } from '../services/assistant-conversations'
 import { registerConversationHandlers } from './conversation-handlers'
 import type { SemanticSearch } from '../search/semantic-search'
 
-export function registerAIHandlers(queue: TranscriptionQueue, vault: CredentialVault, providers: ProviderFactory, changed: () => void, chatgpt: ChatGPTAuth, openBrowser: (url: string) => Promise<void>, search?: SemanticSearch, conversationChanged: (id: string) => void = () => undefined): AssistantConversations {
+export function registerAIHandlers(queue: TranscriptionQueue, vault: CredentialVault, providers: ProviderFactory, changed: () => void, chatgpt: ChatGPTAuth, openBrowser: (url: string) => Promise<void>, search?: SemanticSearch, conversationChanged: (id: string) => void = () => undefined, notes?:WrittenNotes): AssistantConversations {
   const verifying = new Set<string>()
-  const assistant = new RecordingAssistant(vault, providers, search ? (query, project, signal) => search.citations(query, project, signal) : undefined)
+  const assistant = new RecordingAssistant(vault, providers, search ? (query, project, signal) => search.citations(query, project, signal) : undefined, notes)
   const conversations = new AssistantConversations({ answer: (question, project, history, signal) => assistant.ask(question, project, history, signal), changed: conversationChanged })
   registerConversationHandlers(conversations)
   let chatting = false
   handle('assistant:ask', async (question, project, history) => {
     const text = validateText(question, 4000)
-    if (!text) throw new Error('Ask a question about your recordings.')
+    if (!text) throw new Error('Ask a question about your library sources.')
     if (!Array.isArray(history) || history.length > 8) throw new Error('Invalid conversation history.')
     const messages = history.map(message => {
       if (!message || typeof message !== 'object' || !['user', 'assistant'].includes(message.role)) throw new Error('Invalid chat message.')

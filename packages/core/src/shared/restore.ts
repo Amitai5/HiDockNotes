@@ -1,6 +1,6 @@
 export interface RestorePreview {
   id: string; fileName: string; createdAt: string; appVersion: string
-  counts: Record<string, number>; localRecordings: number; deviceOnly: number; bytes: number; changedAudio: number
+  writtenNotes?: number; counts: Record<string, number>; localRecordings: number; deviceOnly: number; bytes: number; changedAudio: number
 }
 export interface RestoreState {
   phase: 'idle' | 'verifying' | 'ready' | 'scheduled' | 'failed'

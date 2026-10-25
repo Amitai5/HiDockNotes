@@ -1,6 +1,6 @@
 {
   "name": "hidocknotes-app",
-  "version": "0.15.5",
+  "version": "0.16.0",
   "description": "Desktop client for a self-hosted HiDockNotes server, with native USB sync.",
   "main": "out/main/index.js",
   "license": "MIT",

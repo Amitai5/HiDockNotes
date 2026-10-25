@@ -21,7 +21,7 @@ export function AssistantWorkspace({ chat, source }: { chat: ReactNode; source: 
   const endDrag = (): void => { drag.current = null; setResizing(false) }
   return <div ref={root} className={`assistant-workspace${source ? ' has-source' : ''}`} data-resizing={resizing} style={{ '--source-width': `${width}px` } as CSSProperties}>
     {chat}
-    {source && <><div className="assistant-source-resizer" role="separator" aria-label="Resize recording source panel" aria-orientation="vertical" aria-valuemin={MIN_SOURCE} aria-valuemax={maximum} aria-valuenow={width} tabIndex={0}
+    {source && <><div className="assistant-source-resizer" role="separator" aria-label="Resize source panel" aria-orientation="vertical" aria-valuemin={MIN_SOURCE} aria-valuemax={maximum} aria-valuenow={width} tabIndex={0}
       onPointerDown={event => { if (event.button !== 0) return; drag.current = { x: event.clientX, width }; setResizing(true); event.currentTarget.setPointerCapture?.(event.pointerId); event.preventDefault() }}
       onPointerMove={event => { if (drag.current) resize(drag.current.width + drag.current.x - event.clientX) }}
       onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag} onDoubleClick={() => resize(DEFAULT_SOURCE)} onKeyDown={event => {

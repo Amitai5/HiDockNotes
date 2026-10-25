@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { AssistantAnswer, ChatMessage, RecordingCitation } from '../../../src/shared/ai'
+import type { AssistantAnswer, ChatMessage, SourceCitation } from '../../../src/shared/ai'
 import type { ConversationDetail, ConversationView, SavedChatMessage } from '../../../src/shared/conversations'
 import { queryAll, queryOne, run, runInTransaction } from './database'
 
@@ -36,7 +36,7 @@ export class AssistantConversations {
   get(id: string, before?: number): ConversationDetail {
     const conversation = this.view(this.row(id))
     const rows = queryAll<MessageRow>('SELECT * FROM assistant_messages WHERE conversation_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?', [id, before ?? Number.MAX_SAFE_INTEGER, PAGE_SIZE + 1])
-    return { conversation, hasEarlier: rows.length > PAGE_SIZE, messages: rows.slice(0, PAGE_SIZE).reverse().map(row => ({ id: row.id, ordinal: row.ordinal, role: row.role, content: row.content, citations: JSON.parse(row.citations) as RecordingCitation[], createdAt: row.created_at })) }
+    return { conversation, hasEarlier: rows.length > PAGE_SIZE, messages: rows.slice(0, PAGE_SIZE).reverse().map(row => ({ id: row.id, ordinal: row.ordinal, role: row.role, content: row.content, citations: JSON.parse(row.citations) as SourceCitation[], createdAt: row.created_at })) }
   }
   rename(id: string, title: string, version: number): ConversationDetail {
     this.assertIdle(id)
@@ -49,7 +49,7 @@ export class AssistantConversations {
     if (this.active.size) return Promise.reject(new Error('Wait for the current answer to finish, or stop it first.'))
     const row = this.row(id)
     if (row.version !== version) return Promise.reject(new Error('This chat changed. Reopen it before sending.'))
-    if (!question.trim()) return Promise.reject(new Error('Ask a question about your recordings.'))
+    if (!question.trim()) return Promise.reject(new Error('Ask a question about your library sources.'))
     run('UPDATE assistant_conversations SET draft=? WHERE id=?', [question.trim(), id])
     const controller = new AbortController()
     const task = Promise.resolve().then(() => this.answer(row, question.trim(), controller.signal))
@@ -66,7 +66,11 @@ export class AssistantConversations {
     if (!answer.text.trim() || answer.text.length > 200000 || answer.citations.length > 6) throw new Error('The answer is too large to save. Try a more focused question.')
     const date = this.now().toISOString()
     runInTransaction(() => {
-      if (answer.citations.some(citation => !queryOne('SELECT id FROM recordings WHERE id=?', [citation.recordingId]))) throw new Error('A source recording was deleted while the answer was being prepared. Please ask again.')
+      if (answer.citations.some(citation => citation.kind!=='note' && !queryOne('SELECT id FROM recordings WHERE id=?', [citation.recordingId]))) throw new Error('A source recording was deleted while the answer was being prepared. Please ask again.')
+      for(const citation of answer.citations)if(citation.kind==='note'){
+        if(!/^[a-zA-Z0-9_-]{1,80}$/.test(citation.noteId)||!Number.isSafeInteger(citation.revision)||citation.revision<1||!/^[a-zA-Z0-9_-]{1,80}$/.test(citation.blockId)||typeof citation.excerpt!=='string'||citation.excerpt.length>6000)throw Error('The written-note citation is invalid.')
+        const current=queryOne<{revision:number}>('SELECT revision FROM written_notes WHERE id=?',[citation.noteId]);if(!current||current.revision<citation.revision)throw Error('A source note was deleted while the answer was being prepared. Please ask again.')
+      }
       if (!run("UPDATE assistant_conversations SET updated_at=?,version=version+1,draft='',title=CASE WHEN title_manual=0 AND version=0 THEN ? ELSE title END WHERE id=? AND version=?", [date, question.replace(/\s+/g, ' ').slice(0, 90), row.id, row.version]).changes) throw new Error('This chat changed while the answer was being prepared. Your saved messages were kept.')
       const ordinal = queryOne<{ last: number }>('SELECT COALESCE(max(ordinal),-1) AS last FROM assistant_messages WHERE conversation_id=?', [row.id])!.last + 1
       for (const [offset, role, content, citations] of [[0, 'user', question, []], [1, 'assistant', answer.text, answer.citations]] as const) run('INSERT INTO assistant_messages(id,conversation_id,ordinal,role,content,citations,created_at) VALUES (?,?,?,?,?,?,?)', [randomUUID(), row.id, ordinal + offset, role, content, JSON.stringify(citations), date])

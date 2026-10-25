@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { validateNoteDocument, notePlainText, NOTE_LIMITS } from '../../../src/shared/note-document'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -101,7 +102,23 @@ const migrations = [
    CREATE TABLE server_uploads (id TEXT PRIMARY KEY, filename TEXT NOT NULL, size INTEGER NOT NULL, offset INTEGER NOT NULL DEFAULT 0, checksum TEXT NOT NULL, serial TEXT, device_filename TEXT, recorded_at TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'uploading', recording_id TEXT, created_at INTEGER NOT NULL);
    CREATE TABLE server_device_commands (id TEXT PRIMARY KEY, serial TEXT NOT NULL, filename TEXT NOT NULL, size INTEGER NOT NULL, checksum TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL, UNIQUE(serial,filename,checksum));
    CREATE TABLE server_captures (id TEXT PRIMARY KEY, serial TEXT NOT NULL, frames INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'recording', created_at TEXT NOT NULL, recording_id TEXT);
-   CREATE TABLE server_tokens (token_hash TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);`
+   CREATE TABLE server_tokens (token_hash TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);`,
+  `CREATE TABLE written_notes (id TEXT PRIMARY KEY,project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,title TEXT NOT NULL,document_json TEXT NOT NULL CHECK(json_valid(document_json)),plain_text TEXT NOT NULL,document_schema INTEGER NOT NULL CHECK(document_schema=1),revision INTEGER NOT NULL CHECK(revision>0),client_request_id TEXT NOT NULL UNIQUE,create_hash TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+   CREATE INDEX written_note_project ON written_notes(project_id,created_at,id);
+   CREATE TABLE written_note_versions (note_id TEXT NOT NULL REFERENCES written_notes(id) ON DELETE CASCADE,revision INTEGER NOT NULL,snapshot_json TEXT NOT NULL CHECK(json_valid(snapshot_json)),created_at TEXT NOT NULL,PRIMARY KEY(note_id,revision));
+   CREATE TABLE written_note_mutations (note_id TEXT NOT NULL REFERENCES written_notes(id) ON DELETE CASCADE,mutation_id TEXT NOT NULL,payload_hash TEXT NOT NULL,revision INTEGER NOT NULL,PRIMARY KEY(note_id,mutation_id));
+   CREATE TABLE written_note_tags (note_id TEXT NOT NULL REFERENCES written_notes(id) ON DELETE CASCADE,tag TEXT NOT NULL,PRIMARY KEY(note_id,tag));
+   CREATE VIRTUAL TABLE written_note_fts USING fts5(note_id UNINDEXED,title,body,tokenize='unicode61');
+   CREATE TRIGGER written_note_insert AFTER INSERT ON written_notes BEGIN INSERT INTO written_note_fts(note_id,title,body) VALUES (new.id,new.title,new.plain_text); END;
+   CREATE TRIGGER written_note_update AFTER UPDATE OF title,plain_text ON written_notes BEGIN UPDATE written_note_fts SET title=new.title,body=new.plain_text WHERE note_id=new.id; END;
+   CREATE TRIGGER written_note_delete AFTER DELETE ON written_notes BEGIN DELETE FROM written_note_fts WHERE note_id=old.id; END;
+   CREATE TABLE written_note_semantic_documents (note_id TEXT PRIMARY KEY REFERENCES written_notes(id) ON DELETE CASCADE,revision INTEGER NOT NULL,model TEXT NOT NULL,indexed_at TEXT NOT NULL);
+   CREATE TABLE written_note_semantic_chunks (id INTEGER PRIMARY KEY,note_id TEXT NOT NULL REFERENCES written_notes(id) ON DELETE CASCADE,revision INTEGER NOT NULL,position INTEGER NOT NULL,block_id TEXT NOT NULL,heading TEXT,text TEXT NOT NULL,embedding BLOB NOT NULL,UNIQUE(note_id,position));
+   CREATE TRIGGER written_note_semantic_stale AFTER UPDATE OF revision ON written_notes BEGIN DELETE FROM written_note_semantic_documents WHERE note_id=new.id; DELETE FROM written_note_semantic_chunks WHERE note_id=new.id; END;
+   ALTER TABLE server_uploads ADD COLUMN project_id TEXT;
+   ALTER TABLE server_uploads ADD COLUMN request_id TEXT;
+   CREATE UNIQUE INDEX upload_request_identity ON server_uploads(request_id) WHERE request_id IS NOT NULL;
+   ALTER TABLE transcription_jobs ADD COLUMN context_snapshot TEXT;`
 ]
 
 export const DATABASE_SCHEMA_VERSION = migrations.length
@@ -123,6 +140,12 @@ export function validateDatabaseSchema(database: Database.Database): void {
     for (const migration of migrations.slice(0, version)) reference.exec(migration)
     const schema = (db: Database.Database): string => JSON.stringify(db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all())
     if (schema(database) !== schema(reference)) throw new Error('The backup database schema is not recognized.')
+    if(version>=15){
+      for(const row of database.prepare('SELECT id,title,document_json,plain_text,document_schema,revision FROM written_notes').all() as {id:string;title:string;document_json:string;plain_text:string;document_schema:number;revision:number}[]){
+        if(row.title.length>NOTE_LIMITS.title||row.document_schema!==1||!Number.isSafeInteger(row.revision)||row.revision<1||notePlainText(validateNoteDocument(JSON.parse(row.document_json)))!==row.plain_text)throw Error('The backup contains an invalid written note.')
+      }
+      for(const row of database.prepare('SELECT note_id,revision,snapshot_json FROM written_note_versions').all() as {note_id:string;revision:number;snapshot_json:string}[]){const note=JSON.parse(row.snapshot_json);if(note.id!==row.note_id||note.revision!==row.revision||typeof note.title!=='string'||note.title.length>NOTE_LIMITS.title||note.documentSchema!==1)throw Error('The backup contains an invalid note revision.');validateNoteDocument(note.document)}
+    }
   } finally { reference.close() }
 }
 
@@ -146,6 +169,7 @@ export function initializeDatabase(filePath: string): void {
     })()
   }
 }
+export function rebuildWrittenNoteSearch():void { runInTransaction(()=>{run('DELETE FROM written_note_fts');run('INSERT INTO written_note_fts(note_id,title,body) SELECT id,title,plain_text FROM written_notes');run('DELETE FROM written_note_semantic_chunks');run('DELETE FROM written_note_semantic_documents')}) }
 export function getDatabase(): Database.Database { if (!connection) throw new Error('Database is not initialized.'); return connection }
 export function closeDatabase(): void { connection?.close(); connection = undefined }
 export function queryOne<T>(sql: string, params: unknown[] = []): T | undefined { return getDatabase().prepare(sql).get(...params) as T | undefined }
@@ -182,9 +206,9 @@ export function findTruncatedRecordings(): { id: string; filename: string; fileP
   return queryAll<{ id: string; filename: string; filePath: string; end: number }>('SELECT r.id, r.filename, r.file_path AS filePath, max(s.end) AS end FROM recordings r JOIN segments s ON s.recording_id=r.id WHERE r.file_path IS NOT NULL GROUP BY r.id').filter(r => { const measured = readAudioDuration(r.filePath); return !!measured && r.end > measured.seconds + 1 }).map(({ id, filename, filePath }) => ({ id, filename, filePath }))
 }
 export function getSettings(defaultFolder: string): AppSettings {
-  const rows = queryAll<{ key: string; value: string }>("SELECT key, value FROM settings WHERE key IN ('name','autoConnect','autoDownload','appearance','recordingsPath')")
+  const rows = queryAll<{ key: string; value: string }>("SELECT key, value FROM settings WHERE key IN ('name','autoConnect','autoDownload','autoDeleteFromDevice','appearance','recordingsPath')")
   const values = Object.fromEntries(rows.map(r => [r.key, JSON.parse(r.value) as unknown]))
-  return { name: typeof values.name === 'string' ? values.name : '', autoConnect: values.autoConnect !== false, autoDownload: values.autoDownload !== false, appearance: values.appearance === 'dark' || values.appearance === 'system' ? values.appearance : 'light', recordingsPath: typeof values.recordingsPath === 'string' ? values.recordingsPath : defaultFolder }
+  return { name: typeof values.name === 'string' ? values.name : '', autoConnect: values.autoConnect !== false, autoDownload: values.autoDownload !== false, autoDeleteFromDevice: values.autoDeleteFromDevice === true, appearance: values.appearance === 'dark' || values.appearance === 'system' ? values.appearance : 'light', recordingsPath: typeof values.recordingsPath === 'string' ? values.recordingsPath : defaultFolder }
 }
 export function saveSettings(patch: Partial<AppSettings>): void { runInTransaction(() => { for (const [key, value] of Object.entries(patch)) run('INSERT OR REPLACE INTO settings VALUES (?, ?)', [key, JSON.stringify(value)]) }) }
 export function listRecordings(search = '', status = ''): RecordingView[] {
@@ -214,7 +238,7 @@ export function renameRecording(id: string, title: string): void {
   if (!name || name.length > 200 || /[\u0000-\u001f]/.test(name)) throw new Error('Use a recording title between 1 and 200 characters.')
   if (!run("UPDATE recordings SET title=?, title_source='manual' WHERE id=?", [name, id]).changes) throw new Error('Recording was not found.')
 }
-export function listProjects(): ProjectView[] { return queryAll('SELECT p.id, p.name, count(r.id) AS count FROM projects p LEFT JOIN recordings r ON r.project_id=p.id GROUP BY p.id ORDER BY p.name') }
+export function listProjects(): ProjectView[] { return queryAll('SELECT p.id,p.name,(SELECT count(*) FROM recordings r WHERE r.project_id=p.id) AS count,(SELECT count(*) FROM written_notes n WHERE n.project_id=p.id) AS noteCount,((SELECT count(*) FROM recordings r WHERE r.project_id=p.id)+(SELECT count(*) FROM written_notes n WHERE n.project_id=p.id)) AS itemCount FROM projects p ORDER BY p.name') }
 export function libraryNavigation(): LibraryNavigation {
   const recordings = queryAll<{ id: string; filename: string; title: string | null; projectId: string | null }>('SELECT id, filename, title, project_id AS projectId FROM recordings ORDER BY date_recorded DESC, id')
   const projectRecordings: NonNullable<LibraryNavigation['projectRecordings']> = {}

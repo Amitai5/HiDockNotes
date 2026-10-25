@@ -43,6 +43,7 @@ export interface PipelineDownloadProgress {
   total: number
   bytesDownloaded: number
   totalBytes: number
+  stage?: 'downloading' | 'uploading' | 'verifying'
   eta: number | null
 }
 

@@ -2,7 +2,7 @@
 
 # HiDockNotes
 
-Turn HiDock recordings and imported audio into searchable transcripts, meeting notes, and action items.
+Write project notes and turn HiDock recordings or imported audio into searchable transcripts, meeting notes, and action items.
 
 HiDockNotes is a private recording library you can host on your own server. Open it as a website or install the same interface as a PWA. Sync a HiDock directly from desktop Chrome or Edge, upload existing audio, and access your transcripts, meeting notes, tasks and Assistant from any device. Audio storage, CPU transcription and optional semantic search run on the server. ChatGPT plan and API connections can generate summaries and source-linked answers.
 
@@ -14,8 +14,8 @@ The desktop application is a server-only client with native USB transport on you
 
 | Feature | What you can do |
 | --- | --- |
-| Recorder sync and audio import | Download recordings from a HiDock over USB, or import existing audio without a recorder. Downloads are checked for completeness and verified with SHA-256. |
-| Searchable library | Organize recordings into project folders, add tags, and search titles, transcripts, and summaries. Filter by project, date, or processing status. |
+| Recorder sync and audio import | Download recordings from a HiDock over USB, or import existing audio without a recorder. Downloads are checked for completeness and verified with SHA-256. Sync can optionally delete device files after a verified server copy; automatic downloading obeys its toggle. |
+| Project notes and library | Write rich-text notes without audio; organize notes and recordings in project folders, add tags, and search saved content. Use All / Notes / Recordings, with date/status filters for recordings. |
 | Server transcription | Transcribe with Whisper on your server CPU, with timestamps and speaker labels. Choose Base for speed or Small for higher accuracy. |
 | Meeting notes | Generate a title, meeting type, participants, tags, discussion summary, decisions, open questions, risks, and next steps. |
 | Remembered voices | Name speakers, save clean voice samples locally, and manage people and samples from a compact list and detail panel. |
@@ -50,6 +50,8 @@ To connect ChatGPT from the website, authorize the app, copy the full returned `
 
 See the [self-hosting guide](docs/self-hosting.md) for dataset permissions, resource limits, ChatGPT connection setup, desktop backup migration, restore, MCP, updates and the physical USB validation gate. Releases include a PWA archive, Compose configuration and the exact GHCR image digest alongside the platform installers.
 
+Written notes autosave on the server with conflict checks, recovery drafts, recent history, and safe Markdown/plain-text exports. MCP and Assistant read saved notes alongside recordings; written citations identify the note revision and block without an audio timestamp. See [written notes and upgrade guidance](docs/written-notes.md) for editing, project audio, recovery, and schema-15 backup compatibility.
+
 ## Desktop installers
 
 Open [the latest GitHub release](https://github.com/Amitai5/HiDockNotes/releases/latest), expand **Assets**, and choose the installer for your computer. The installers bundle a sandboxed Electron client and native USB transport. On first launch, enter your server’s HTTPS origin, such as `https://notes.amitai.tech`, and choose **Connect to server**, then sign in. Use **Server → Change server** to edit the address. If the server is unavailable, the app returns to the connection screen. The installer contains no local database, AI provider clients, speech/search models, FFmpeg, processing workers or MCP server.
@@ -73,22 +75,22 @@ Update the Docker image for application features and processing fixes. Update th
 ## First-time setup
 
 1. **Choose transcription.** Open **Settings → AI & transcription**. Local Whisper is selected by default and needs no API key. The speech models download and are verified on first use; afterward, local transcription works offline. Base is faster; Small uses more processing time for higher accuracy.
-2. **Connect summaries and Assistant.** Use **Continue with ChatGPT** with an eligible account and authorize plan usage, or enter a Gemini/OpenAI API key and choose **Verify & save**. Select the provider and model under **Chat & summaries**. Account eligibility and usage limits apply; API providers use their own billing. This selection is separate from audio transcription.
-3. **Add recordings.** Connect a HiDock using a USB data cable and open **Sync**, or choose **Import audio** in **Library**. Supported imports are MP3, M4A, WAV, OGG, FLAC, and HDA.
-4. **Process audio.** Leave **Auto-transcribe on download** enabled for new downloads. Use **Process saved recordings** for existing unprocessed local recordings. The app processes one recording at a time and shows the current stage and waiting queue in Library. Local transcription can finish before a summary provider is connected.
+2. **Connect summaries and Assistant.** Select ChatGPT, Gemini or OpenAI from **Chat & summaries**. Its connection dialog opens on selection; use **Continue with ChatGPT** or enter an API key and choose **Verify & save**. Use **Manage connection** beside a selected provider to reopen it. Key fields are never shown inline or populated with a saved key. Select the provider and model under **Chat & summaries**. Account eligibility and usage limits apply; API providers use their own billing. This selection is separate from audio transcription.
+3. **Add recordings.** Connect a HiDock using a USB data cable and open **Sync**, or choose **New note from audio** in a Library project. Choose **New note** to write without audio. Supported imports are MP3, M4A, WAV, OGG, FLAC, and HDA.
+4. **Process audio.** Leave **Auto-transcribe on download** enabled for new downloads. Use **Process saved recordings** for existing unprocessed local recordings. Under **Transcription → Parallel processing**, set separate limits for simultaneous transcriptions (1–4) and summaries (1–8). Both default to 1; the stages can overlap, and raising a limit allows multiple recordings in that stage. Library shows every active job and its progress. Local transcription can finish before a summary provider is connected.
 5. **Review the result.** Open the recording to read its notes, play the audio, correct transcript text, and name speakers. Settings also lets you choose a language and a Meeting, Call, Interview, Dictation, or Custom prompt summary template.
 
 Cloud transcription is optional: choose Gemini or OpenAI under **Transcription** only if you want audio sent to that provider. ChatGPT account sign-in supports eligible text requests for summaries and Assistant, not audio transcription.
 
-**Optional search setup:** After installation, Library offers **Download & enable** for a 24 MB English semantic-search model. Choose **Skip** to keep using keyword search. You can download, disable, or remove the model later in **Settings → AI & transcription → Search by meaning**. Nothing downloads until you enable it.
+**Optional search setup:** In Settings → AI & transcription → Search by meaning, choose **Download & enable** for a 24 MB English semantic-search model. Choose **Skip** to keep using keyword search. You can download, disable, or remove the model later in **Settings → AI & transcription → Search by meaning**. Nothing downloads until you enable it.
 
 ## Use your library
 
-### Organize and find recordings
+### Organize and find notes and recordings
 
-- Create project folders in Library. Opening a folder shows its own recordings; **Unfiled recordings** contains items without a project.
-- Drag a recording onto a sidebar folder to file it, or onto Unfiled to remove its project assignment.
-- Resize the sidebar and the recording workspace divider by dragging their edges. Folder names wrap to stay readable.
+- Create project folders from the Projects sidebar control. Opening a project shows its notes and recordings; **Unfiled items** contains both kinds without a project.
+- Drag a note or recording onto a sidebar project to move it, or onto Unfiled items to remove its project assignment.
+- Resize the sidebar and the recording workspace divider by dragging their edges. Long project names have an accessible full label.
 - Rename a recording from its title and manage tags from its overview. Manual titles and tags are preserved when generating new notes.
 - Use the top search bar to search saved titles, transcripts, and summaries across folders. With local meaning search enabled, choose **Meaning + keywords** to find related passages even when your wording differs. Results show a matching passage and link to its timestamp.
 
@@ -218,9 +220,9 @@ The hosted MCP endpoint uses stateless Streamable HTTP. Turning access off revok
 | Processing is waiting | Check the Library queue and **Settings → AI & transcription** for missing models, provider setup, account limits, or a paused session. Use **Resume processing** when shown. |
 | Transcript exists but summary is missing | Connect the selected **Chat & summaries** provider. The transcript is retained while its summary waits for setup. |
 | Processing failed | Read the recording's error and use **Retry processing**. Completed local work is cached so retries can reuse it. |
-| Transcription is slow | Try Whisper Base and set a known language. Processing uses the CPU and runs one recording at a time; long audio and first-use model downloads take longer. |
+| Transcription is slow | Try Whisper Base and set a known language. Processing uses the server CPU; long audio and first-use model downloads take longer. Raise **Simultaneous transcriptions** when CPU and memory permit, or lower it to reduce resource use. |
 | Too many speakers or an incorrect name | Set the known speaker count, retranscribe, and review the speaker labels. Manage incorrect remembered profiles or samples in **Settings → Voices**. |
-| Device recording cannot be deleted | Connect the original recorder and wait for scans/downloads to finish. A verified local copy and device acknowledgement are required. |
+| Device recording cannot be deleted | Connect the original recorder and wait for scans/downloads to finish. A verified server copy and device acknowledgement are required. Deletion does not download the device audio again. |
 | MCP client cannot connect | Keep HiDockNotes open, enable MCP access, and copy the current generated configuration into the client. |
 
 If the problem persists, [open an issue](https://github.com/Amitai5/HiDockNotes/issues) with the app version, OS, steps to reproduce, and relevant error. Remove private meeting content and credentials before sharing logs.

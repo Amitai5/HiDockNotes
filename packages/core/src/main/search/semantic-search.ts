@@ -1,5 +1,9 @@
 import { rm } from 'node:fs/promises'
-import type { RecordingCitation } from '../../../src/shared/ai'
+import type { SourceCitation } from '../../../src/shared/ai'
+import type {LibraryScope,NoteSearchOptions,NoteSearchPage} from '../../../src/shared/notes'
+import {WrittenNotes,pageOffset,pageCursor} from '../services/written-notes'
+import {noteSearchDocument,saveNoteSearchDocument,noteSemanticHits} from './written-note-index'
+
 import type { RecordingView } from '../../../src/shared/contracts'
 import { EMPTY_SEMANTIC_STATE, type SearchMode, type SemanticSearchState } from '../../../src/shared/semantic-search'
 import { listRecordings, queryAll, queryOne, run } from '../services/database'
@@ -25,7 +29,7 @@ export class SemanticSearch {
     if (enabled && modelReady) this.scheduleIndex()
   }
   state(): SemanticSearchState {
-    return { ...this.view, indexedRecordings: queryOne<{ count: number }>('SELECT count(*) AS count FROM semantic_documents WHERE model=?', [SEARCH_MODEL_ID])!.count, totalRecordings: queryOne<{ count: number }>('SELECT count(*) AS count FROM recordings WHERE verified=1')!.count }
+    return { ...this.view, indexedRecordings: queryOne<{ count: number }>('SELECT count(*) AS count FROM semantic_documents WHERE model=?', [SEARCH_MODEL_ID])!.count, indexedNotes: queryOne<{count:number}>('SELECT count(*) AS count FROM written_note_semantic_documents WHERE model=?',[SEARCH_MODEL_ID])!.count, totalNotes: queryOne<{count:number}>('SELECT count(*) AS count FROM written_notes')!.count, totalRecordings: queryOne<{ count: number }>('SELECT count(*) AS count FROM recordings WHERE verified=1')!.count }
   }
   enable(): SemanticSearchState {
     if (this.task) return this.state()
@@ -42,7 +46,7 @@ export class SemanticSearch {
     await this.disable()
     // The path is a fixed application-owned child; no caller-supplied path reaches deletion.
     await rm(this.directory, { recursive: true, force: true })
-    run('DELETE FROM semantic_documents'); run('DELETE FROM semantic_chunks')
+    run('DELETE FROM semantic_documents'); run('DELETE FROM semantic_chunks'); run('DELETE FROM written_note_semantic_documents'); run('DELETE FROM written_note_semantic_chunks')
     this.publish({ modelReady: false, progress: 0 }); return this.state()
   }
   scheduleIndex(): void {
@@ -65,11 +69,12 @@ export class SemanticSearch {
       return recording ? [{ ...recording, ...(hit ? { searchMatch: { kind: 'meaning' as const, excerpt: hit.text.slice(0, 450), start: hit.start } } : {}) }] : []
     })
   }
-  async citations(query: string, projectId: string | null, signal?: AbortSignal): Promise<RecordingCitation[]> {
+  async citations(query: string, projectId: string | null, signal?: AbortSignal): Promise<SourceCitation[]> {
     if (!this.view.enabled || !this.view.modelReady || this.view.phase === 'failed') return []
     try {
       const [vector] = await this.dependencies.runner.embed([query.slice(0, 4000)], signal)
-      return semanticCitations(await semanticHits(vector, projectId, true))
+      const records=semanticCitations(await semanticHits(vector,projectId,true)),notes=await noteSemanticHits(vector,projectId===null?{kind:'all'}:{kind:'project',projectId},signal)
+      return [...records,...notes.slice(0,6).map(hit=>({kind:'note' as const,number:0,...hit}))]
     } catch {
       signal?.throwIfAborted()
       this.publish({ phase: 'failed', error: 'Meaning search could not run. Assistant is using keyword search; retry local search setup in Settings.' })
@@ -93,6 +98,26 @@ export class SemanticSearch {
       signal?.throwIfAborted()
       return unavailable('Local meaning search could not run. Keyword results are shown; retry search setup in Settings.')
     }
+  }
+  async noteSearch(options:NoteSearchOptions,signal?:AbortSignal):Promise<NoteSearchPage> {
+    const notes=new WrittenNotes({changed:()=>undefined}),keywords=notes.search({...options,mode:'keywords'})
+    if(options.mode!=='meaning')return keywords
+    if(!this.view.enabled||!this.view.modelReady||this.view.phase==='failed')return{...keywords,fallbackReason:'Local meaning search is disabled or unavailable. Keyword results are shown.'}
+    try{
+      const scope=options.scope??{kind:'all'},identity=['note-search',scope,options.query],offset=pageOffset(options.cursor,identity),limit=options.limit??20
+      if(offset>=1000)return{...keywords,fallbackReason:'Meaning search is limited to 1,000 notes. Complete keyword results are shown; narrow the project scope to use meaning search.'}
+      const [vector]=await this.dependencies.runner.embed([options.query],signal),hits=await noteSemanticHits(vector,scope,signal),all=new Map<string,NoteSearchPage['hits'][number]>()
+      let cursor:string|null=null
+      do{const page=notes.search({...options,mode:'keywords',cursor,limit:50});for(const hit of page.hits)all.set(hit.noteId,hit);cursor=page.nextCursor}while(cursor&&all.size<=1000)
+      if(cursor||all.size>1000||hits.length>1000)return{...keywords,fallbackReason:'Meaning search is limited to 1,000 notes. Complete keyword results are shown; narrow the project scope to use meaning search.'}
+      for(const hit of hits)if(!all.has(hit.noteId))all.set(hit.noteId,hit)
+      const rows=[...all.values()],indexing=(this.state().indexedNotes??0)<(this.state().totalNotes??0)
+      return{hits:rows.slice(offset,offset+limit),nextCursor:rows.length>offset+limit?pageCursor(offset+limit,identity):null,mode:'meaning',indexing,fallbackReason:indexing?'Some notes are still being indexed. Current keyword matches remain available.':null}
+    }catch(error){signal?.throwIfAborted();if(options.cursor)throw error;return{...keywords,fallbackReason:'Local meaning search could not run. Keyword results are shown.'}}
+  }
+  async libraryMatches(query:string,scope:LibraryScope,signal?:AbortSignal):Promise<{notes:string[];recordings:string[];fallbackReason:string|null}> {
+    if(!this.view.enabled||!this.view.modelReady||this.view.phase==='failed')return{notes:[],recordings:[],fallbackReason:'Local meaning search is unavailable. Keyword results are shown.'}
+    try{const [vector]=await this.dependencies.runner.embed([query.slice(0,500)],signal),records=await semanticHits(vector,scope.kind==='project'?scope.projectId:null,false,{unfiledOnly:scope.kind==='unfiled',signal}),notes=await noteSemanticHits(vector,scope,signal);return{recordings:records.map(hit=>hit.recordingId),notes:notes.slice(0,1000).map(hit=>hit.noteId),fallbackReason:null}}catch{signal?.throwIfAborted();return{notes:[],recordings:[],fallbackReason:'Local meaning search could not run. Keyword results are shown.'}}
   }
   async stop(): Promise<void> { clearTimeout(this.timer); this.controller?.abort(); await this.task?.catch(() => undefined); await this.dependencies.runner.stop() }
   private start(download: boolean): void {
@@ -129,6 +154,18 @@ export class SemanticSearch {
       }
       this.publish({ progress: (position + 1) / Math.max(1, ids.length) })
       await new Promise<void>(resolve => setImmediate(resolve))
+    }
+    const noteIds=queryAll<{id:string}>('SELECT id FROM written_notes ORDER BY updated_at DESC,id').map(row=>row.id)
+    for(const [position,id]of noteIds.entries()){
+      signal.throwIfAborted()
+      if(queryOne("SELECT id FROM transcription_jobs WHERE stage IN ('converting','diarizing','transcribing','identifying') LIMIT 1")){this.dirty=true;this.publish({phase:'waiting'});return}
+      const document=noteSearchDocument(id),saved=queryOne<{revision:number;model:string}>('SELECT revision,model FROM written_note_semantic_documents WHERE note_id=?',[id])
+      if(document&&(saved?.revision!==document.revision||saved?.model!==SEARCH_MODEL_ID)){
+        const vectors:number[][]=[]
+        for(let offset=0;offset<document.chunks.length;offset+=8){signal.throwIfAborted();if(queryOne("SELECT id FROM transcription_jobs WHERE stage IN ('converting','diarizing','transcribing','identifying') LIMIT 1")){this.dirty=true;this.publish({phase:'waiting'});return}vectors.push(...await this.dependencies.runner.embed(document.chunks.slice(offset,offset+8).map(chunk=>chunk.text),signal));signal.throwIfAborted()}
+        saveNoteSearchDocument(document,vectors,(this.dependencies.now?.()??new Date()).toISOString())
+      }
+      this.publish({progress:(position+1)/Math.max(1,noteIds.length)});await new Promise<void>(resolve=>setImmediate(resolve))
     }
     this.publish({ phase: 'ready', progress: 1, error: null })
   }

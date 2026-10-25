@@ -12,20 +12,17 @@ import { repairRecordingSpeakers } from './speaker-repair'
 import { ChatGPTPlanBlocked } from './chatgpt-protocol'
 import { referenceContextSnapshot } from '../services/reference-context'
 
-export interface ProcessingRunner { run(input: ProcessingInput, observer: BackendObserver): Promise<ProcessingResult>; stop(): Promise<void> }
+export interface ProcessingRunner { run(input: ProcessingInput, observer: BackendObserver): Promise<ProcessingResult>; stop(recordingId?: string): Promise<void> }
 interface QueueDependencies { vault: CredentialVault; settings(): AISettings; dataPath: string; runner: ProcessingRunner; changed(): void; activity(type: 'info' | 'success' | 'warning' | 'error', message: string): void; now?: () => Date; reviewMode?: boolean; chatgpt?: { state(): ChatGPTState; block?(id: string, message: string): void } }
-interface Job { recording_id: string; attempt: number; next_attempt_at: string | null; mode: 'process' | RecordingReprocessMode; generation: string | null }
+interface Job { recording_id: string; attempt: number; next_attempt_at: string | null; mode: 'process' | RecordingReprocessMode; generation: string | null; context_snapshot: string | null }
+interface ActiveTask { lane: 'transcription' | 'summary'; startedAt: string; chatgptProfileId?: string; sessionCancelled: boolean; settlement: Promise<void> }
 const REVIEW_PAUSED_MESSAGE = 'Background processing is paused. Resume processing to continue.'
 
 export class TranscriptionQueue {
-  private active = false
+  private readonly running = new Map<string, ActiveTask>()
   private stopped = false
   private timer: ReturnType<typeof setTimeout> | null = null
   private readonly now: () => Date
-  private activeChatGPTProfile: string | undefined
-  private sessionCancelled = false
-  private startedAt: string | null = null
-  private activeRecordingId: string | null = null
   private readonly paused = new Set<string>()
   private reviewPaused: boolean
   constructor(private readonly dependencies: QueueDependencies) { this.now = dependencies.now ?? (() => new Date()); this.reviewPaused = !!dependencies.reviewMode }
@@ -36,14 +33,14 @@ export class TranscriptionQueue {
     const transcriptionMissing = settings.transcription.provider !== 'local' && !providers.find(item => item.provider === settings.transcription.provider)?.verified
     const subscriptionMissing = settings.chat.provider === 'chatgpt' && !chatgpt?.planEnabled
     const summaryReason = subscriptionMissing ? 'Continue with ChatGPT in Settings and authorize plan usage for summaries.' : settings.chat.provider === 'chatgpt' && chatgpt?.usageBlocked ? chatgpt.error ?? 'ChatGPT plan requests are paused. Open Manage usage in Settings.' : settings.chat.provider !== 'chatgpt' && !providers.find(item => item.provider === settings.chat.provider)?.verified ? `Verify ${settings.chat.provider === 'gemini' ? 'Gemini' : 'OpenAI'} in Settings for summaries and action items.` : null
-    const reason = transcriptionMissing ? `Verify ${settings.transcription.provider === 'gemini' ? 'Gemini' : 'OpenAI'} in Settings to start transcription.` : settings.transcription.provider === 'local' ? null : summaryReason
+    const reason = transcriptionMissing ? `Verify ${settings.transcription.provider === 'gemini' ? 'Gemini' : 'OpenAI'} in Settings to start transcription.` : null
     const paused = this.reviewPaused ? REVIEW_PAUSED_MESSAGE : null
     return { settings, providers, ready: !reason && !paused, reason: paused ?? reason, chatgpt, summaryReady: !summaryReason && !paused, summaryReason: paused ?? summaryReason, queue: this.queueView() }
   }
   private queueView(): TranscriptionQueueView {
-    const active = queryOne<NonNullable<TranscriptionQueueView['active']>>("SELECT r.id, COALESCE(r.title,r.filename) AS title, j.stage, j.mode, j.progress, j.message FROM transcription_jobs j JOIN recordings r ON r.id=j.recording_id WHERE j.stage NOT IN ('queued','done','empty','failed') ORDER BY j.created_at LIMIT 1")
+    const activeJobs = queryAll<NonNullable<TranscriptionQueueView['active']>>("SELECT r.id, COALESCE(r.title,r.filename) AS title, j.stage, j.mode, j.progress, j.message FROM transcription_jobs j JOIN recordings r ON r.id=j.recording_id WHERE j.stage NOT IN ('queued','done','empty','failed') ORDER BY j.created_at")
     const waiting = queryOne<{ transcriptions: number; summaries: number }>("SELECT count(CASE WHEN mode<>'summarize' THEN 1 END) AS transcriptions,count(CASE WHEN mode='summarize' THEN 1 END) AS summaries FROM transcription_jobs WHERE stage='queued'")!
-    return { waiting: waiting.transcriptions + waiting.summaries, waitingTranscriptions: waiting.transcriptions, waitingSummaries: waiting.summaries, reviewPaused: this.reviewPaused, active: active ? { ...active, startedAt: this.startedAt } : null }
+    return { waiting: waiting.transcriptions + waiting.summaries, waitingTranscriptions: waiting.transcriptions, waitingSummaries: waiting.summaries, reviewPaused: this.reviewPaused, active: activeJobs[0] ? { ...activeJobs[0], startedAt: this.running.get(activeJobs[0].id)?.startedAt ?? null } : null, activeJobs: activeJobs.map(active => ({ ...active, startedAt: this.running.get(active.id)?.startedAt ?? null })) }
   }
   /** Only a confirmed in-app action can resume this session's paused jobs. */
   resumeReview(confirmed: boolean): void {
@@ -118,30 +115,31 @@ export class TranscriptionQueue {
     } else if (!recording.verified || !recording.file_path || !recording.checksum) throw new Error('Download and verify the local audio before retranscribing it.')
     else if (!state.ready) throw new Error(state.reason ?? 'Configure a transcription provider in Settings.')
     runInTransaction(() => {
-      run("INSERT INTO transcription_jobs(id,recording_id,stage,created_at,mode,generation) VALUES (?,?,'queued',?,?,?) ON CONFLICT(recording_id) DO UPDATE SET stage='queued',attempt=0,next_attempt_at=NULL,progress=0,error=NULL,message='Waiting to regenerate…',mode=excluded.mode,generation=excluded.generation", [randomUUID(), id, this.now().toISOString(), mode, mode === 'transcribe' ? randomUUID() : null])
+      run("INSERT INTO transcription_jobs(id,recording_id,stage,created_at,mode,generation) VALUES (?,?,'queued',?,?,?) ON CONFLICT(recording_id) DO UPDATE SET stage='queued',attempt=0,next_attempt_at=NULL,progress=0,error=NULL,message='Waiting to regenerate…',mode=excluded.mode,generation=excluded.generation,context_snapshot=NULL", [randomUUID(), id, this.now().toISOString(), mode, mode === 'transcribe' ? randomUUID() : null])
       run("UPDATE recordings SET status='queued' WHERE id=?", [id])
     })
     this.dependencies.changed(); this.kick()
   }
   kick(): void {
-    if (this.stopped || this.active || this.reviewPaused) return
+    if (this.stopped || this.reviewPaused) return
     if (this.timer) clearTimeout(this.timer)
-    this.timer = setTimeout(() => { this.timer = null; void this.tick().catch(() => this.dependencies.activity('error', 'The processing queue could not start. Check Settings and retry.')) }, 0)
+    this.timer = setTimeout(() => { this.timer = null; try { this.tick() } catch { this.dependencies.activity('error', 'The processing queue could not start. Check Settings and retry.') } }, 0)
   }
   async stop(): Promise<void> {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     await this.dependencies.runner.stop()
+    await Promise.all([...this.running.values()].map(task => task.settlement))
   }
   /** Stops only this recording's AI worker while a confirmed deletion settles. */
   async withRecordingPaused<T>(id: string, operation: () => Promise<T>): Promise<T> {
     if (this.paused.has(id)) throw new Error('This recording is already being changed.')
     this.paused.add(id)
-    const wasActive = this.activeRecordingId === id
-    try { if (wasActive) await this.dependencies.runner.stop(); return await operation() }
+    const active = this.running.get(id)
+    try { if (active) { await this.dependencies.runner.stop(id); await active.settlement }; return await operation() }
     finally {
-      if (wasActive && queryOne('SELECT id FROM recordings WHERE id=?', [id])) runInTransaction(() => {
+      if (active && queryOne('SELECT id FROM recordings WHERE id=?', [id])) runInTransaction(() => {
         run("UPDATE transcription_jobs SET stage='queued',attempt=MAX(0,attempt-1),next_attempt_at=NULL,error=NULL,message='Waiting to resume…' WHERE recording_id=? AND stage NOT IN ('done','empty','failed')", [id])
         run("UPDATE recordings SET status='queued' WHERE id=? AND id IN (SELECT recording_id FROM transcription_jobs WHERE stage='queued')", [id])
       })
@@ -149,49 +147,64 @@ export class TranscriptionQueue {
     }
   }
   invalidateChatGPTSession(profileId: string): void {
-    if (!this.active || this.activeChatGPTProfile !== profileId) return
-    this.sessionCancelled = true
-    void this.dependencies.runner.stop().catch(() => this.dependencies.activity('warning', 'The old ChatGPT processing session could not close immediately.'))
+    for (const [id, task] of this.running) {
+      if (task.chatgptProfileId !== profileId) continue
+      task.sessionCancelled = true
+      void this.dependencies.runner.stop(id).catch(() => this.dependencies.activity('warning', 'The old ChatGPT processing session could not close immediately.'))
+    }
   }
-  private async tick(): Promise<void> {
-    if (this.stopped || this.active || this.reviewPaused) return
-    const state = this.state()
-    const job = queryOne<Job>("SELECT recording_id, attempt, next_attempt_at, mode, generation FROM transcription_jobs WHERE stage='queued' AND recording_id NOT IN (SELECT recording_id FROM recording_deletions) AND ((mode='summarize' AND ?=1) OR (mode='transcribe' AND ?=1 AND ?=1) OR (mode='process' AND ?=1)) ORDER BY COALESCE(next_attempt_at,created_at), created_at LIMIT 1", [Number(state.summaryReady), Number(state.ready), Number(state.summaryReady), Number(state.ready)])
-    if (!job) return
-    const wait = job.next_attempt_at ? Date.parse(job.next_attempt_at) - this.now().getTime() : 0
-    if (wait > 0) { this.timer = setTimeout(() => { this.timer = null; this.kick() }, Math.min(wait, 2147483647)); return }
+  private tick(): void {
+    if (this.stopped || this.reviewPaused) return
+    const state = this.state(), limits = { transcription: state.settings.maxConcurrentTranscriptions, summary: state.settings.maxConcurrentSummaries }
+    const counts = { transcription: 0, summary: 0 }
+    for (const task of this.running.values()) counts[task.lane]++
+    const jobs = queryAll<Job>("SELECT recording_id, attempt, next_attempt_at, mode, generation, context_snapshot FROM transcription_jobs WHERE stage='queued' AND recording_id NOT IN (SELECT recording_id FROM recording_deletions) AND ((mode='summarize' AND ?=1) OR (mode='transcribe' AND ?=1 AND ?=1) OR (mode='process' AND ?=1)) ORDER BY COALESCE(next_attempt_at,created_at), created_at", [Number(state.summaryReady), Number(state.ready), Number(state.summaryReady), Number(state.ready)])
+    let wake = Infinity
+    for (const job of jobs) {
+      const lane = job.mode === 'summarize' ? 'summary' : 'transcription'
+      if (this.running.has(job.recording_id) || this.paused.has(job.recording_id) || counts[lane] >= limits[lane]) continue
+      const wait = job.next_attempt_at ? Date.parse(job.next_attempt_at) - this.now().getTime() : 0
+      if (wait > 0) { wake = Math.min(wake, wait); continue }
+      const task: ActiveTask = { lane, startedAt: this.now().toISOString(), sessionCancelled: false, settlement: Promise.resolve() }
+      this.running.set(job.recording_id, task); counts[lane]++
+      task.settlement = this.processJob(job, task).catch(() => this.dependencies.activity('error', 'The processing result could not be saved. Check disk space and retry.')).finally(() => {
+        if (this.running.get(job.recording_id) === task) this.running.delete(job.recording_id)
+        if (!this.stopped) { this.dependencies.changed(); this.kick() }
+      })
+    }
+    if (Number.isFinite(wake)) this.timer = setTimeout(() => { this.timer = null; this.kick() }, Math.min(wake, 2147483647))
+  }
+  private async processJob(job: Job, task: ActiveTask): Promise<void> {
     const recording = queryOne<Recording>('SELECT * FROM recordings WHERE id=?', [job.recording_id])
     if (!recording || job.mode !== 'summarize' && (!recording.file_path || !recording.checksum || !recording.verified)) {
       run("UPDATE transcription_jobs SET stage='failed', error='The verified local audio is unavailable.' WHERE recording_id=?", [job.recording_id])
-      run("UPDATE recordings SET status='failed' WHERE id=?", [job.recording_id]); this.dependencies.changed(); this.kick(); return
+      run("UPDATE recordings SET status='failed' WHERE id=?", [job.recording_id]); this.dependencies.changed(); return
     }
-    this.active = true
-    this.activeRecordingId = recording.id
-    this.startedAt = this.now().toISOString()
     let chatgptProfileId: string | undefined
-    this.sessionCancelled = false
     try {
       const initialStage = job.mode === 'summarize' ? 'summarizing' : 'converting'
       runInTransaction(() => { run("UPDATE transcription_jobs SET stage=?, progress=0, attempt=attempt+1, error=NULL, next_attempt_at=NULL, message='Starting the background processor…' WHERE recording_id=?", [initialStage, job.recording_id]); run('UPDATE recordings SET status=? WHERE id=?', [initialStage, job.recording_id]) })
       this.dependencies.changed()
       const settings = this.dependencies.settings()
+      const reference = job.context_snapshot ? JSON.parse(job.context_snapshot) : referenceContextSnapshot(recording.project_id)
+      if(!job.context_snapshot)run('UPDATE transcription_jobs SET context_snapshot=? WHERE recording_id=?',[JSON.stringify(reference),recording.id])
       const reviewTranscript = job.mode !== 'summarize' && hasTranscriptCorrections(recording.id)
-      const summaryReady = !reviewTranscript && (this.state().summaryReady ?? true)
+      const summaryReady = job.mode === 'summarize' && (this.state().summaryReady ?? true)
       chatgptProfileId = summaryReady && settings.chat.provider === 'chatgpt' ? this.dependencies.chatgpt?.state().activeProfileId ?? undefined : undefined
-      this.activeChatGPTProfile = chatgptProfileId
+      task.chatgptProfileId = chatgptProfileId
       const keys: ProcessingInput['keys'] = { gemini: null, openai: null }
       for (const provider of new Set([...(job.mode === 'summarize' || settings.transcription.provider === 'local' ? [] : [settings.transcription.provider]), ...(!summaryReady || settings.chat.provider === 'chatgpt' ? [] : [settings.chat.provider])])) keys[provider] = this.dependencies.vault.read(provider)
       if (job.mode === 'summarize') repairRecordingSpeakers(recording.id)
-      const input: ProcessingInput = { id: recording.id, path: recording.file_path ?? '', checksum: recording.checksum ?? '', dataPath: this.dependencies.dataPath, settings, keys, profiles: job.mode === 'summarize' ? [] : voiceCandidates(), chatgptProfileId, summaryReady, recordedAt: recording.date_recorded, generation: job.generation ?? undefined, expectedSpeakers: queryOne<{ expected_speakers: number | null }>('SELECT expected_speakers FROM recording_overviews WHERE recording_id=?', [recording.id])?.expected_speakers ?? undefined, savedTranscript: job.mode === 'summarize' ? savedTranscript(recording.id) : undefined, referenceContext: referenceContextSnapshot(recording.project_id) }
+      const input: ProcessingInput = { id: recording.id, path: recording.file_path ?? '', checksum: recording.checksum ?? '', dataPath: this.dependencies.dataPath, settings, keys, profiles: job.mode === 'summarize' ? [] : voiceCandidates(), chatgptProfileId, summaryReady, recordedAt: recording.date_recorded, generation: job.generation ?? undefined, expectedSpeakers: queryOne<{ expected_speakers: number | null }>('SELECT expected_speakers FROM recording_overviews WHERE recording_id=?', [recording.id])?.expected_speakers ?? undefined, savedTranscript: job.mode === 'summarize' ? savedTranscript(recording.id) : undefined, referenceContext: reference }
       const result = await this.dependencies.runner.run(input, {
         stage: (stage, progress, message) => {
-          if (this.stopped || this.paused.has(recording.id) || this.activeRecordingId !== recording.id) return
+          if (this.stopped || this.paused.has(recording.id) || this.running.get(recording.id) !== task) return
           runInTransaction(() => { run('UPDATE transcription_jobs SET stage=?, progress=?, message=? WHERE recording_id=?', [stage, Math.max(0, Math.min(1, progress)), message, recording.id]); run('UPDATE recordings SET status=? WHERE id=?', [stage, recording.id]) })
           this.dependencies.changed()
         },
-        checkpoint: value => { if (!reviewTranscript && !this.stopped && !this.paused.has(recording.id) && this.activeRecordingId === recording.id) { saveTranscript(recording.id, value, settings); this.dependencies.changed() } }
+        checkpoint: value => { if (job.mode !== 'summarize' && !reviewTranscript && !this.stopped && !this.paused.has(recording.id) && this.running.get(recording.id) === task) { saveTranscript(recording.id, value, settings); this.dependencies.changed() } }
       })
-      if (this.sessionCancelled) throw new ProcessingError('The ChatGPT connection changed. Processing will resume with the selected connection.')
+      if (task.sessionCancelled) throw new ProcessingError('The ChatGPT connection changed. Processing will resume with the selected connection.')
       if (!this.stopped && !this.paused.has(recording.id)) {
         if (reviewTranscript) {
           runInTransaction(() => {
@@ -203,12 +216,18 @@ export class TranscriptionQueue {
           return
         }
         saveProcessingResult(recording.id, result, settings)
+        if (!result.empty && !result.summary && job.mode !== 'summarize' && this.state().summaryReady) {
+          // Release the transcription process before a separately limited summary job starts.
+          this.enqueue(recording.id, true)
+          this.dependencies.activity('success', 'Transcript is ready. The summary is queued separately.')
+          return
+        }
         this.dependencies.activity(result.empty ? 'info' : 'success', result.empty ? 'Skipped an empty recording after local audio checks.' : result.summary ? 'Transcript, summary and action items are ready.' : 'Local transcript is ready. Configure a summary provider to add a summary and action items.')
       }
     } catch (error) {
       if (!this.stopped && !this.paused.has(recording.id)) {
         const safe = safeProcessingError(error)
-        if (this.sessionCancelled) {
+        if (task.sessionCancelled) {
           runInTransaction(() => { run("UPDATE transcription_jobs SET stage='queued', attempt=MAX(0,attempt-1), error=NULL, next_attempt_at=NULL, message='Waiting for the selected ChatGPT connection…' WHERE recording_id=?", [recording.id]); run("UPDATE recordings SET status='queued' WHERE id=?", [recording.id]) })
           return
         }
@@ -223,12 +242,6 @@ export class TranscriptionQueue {
         runInTransaction(() => { run('UPDATE transcription_jobs SET stage=?, error=?, next_attempt_at=?, message=? WHERE recording_id=?', [retry ? 'queued' : 'failed', safe.message, next, retry ? 'Waiting before retry…' : 'Processing stopped. Retry when the issue is resolved.', recording.id]); run('UPDATE recordings SET status=? WHERE id=?', [retry ? 'queued' : 'failed', recording.id]) })
         this.dependencies.activity(retry ? 'warning' : 'error', safe.message)
       }
-    } finally {
-      this.active = false
-      this.activeRecordingId = null
-      this.startedAt = null
-      this.activeChatGPTProfile = undefined
-      if (!this.stopped) { this.dependencies.changed(); this.kick() }
     }
   }
 }

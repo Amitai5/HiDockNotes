@@ -43,16 +43,11 @@ export function saveReferenceContext(projectId: string | null, content: unknown,
 }
 
 /** Takes a bounded context snapshot for a recording or retrieved Assistant sources. */
-export function referenceContextSnapshot(projectId: string | null, recordingIds: string[] = []): ReferenceContextSnapshot {
-  const global = readReferenceContext(null).content
-  const ids = [...new Set(recordingIds)].slice(0, 6)
-  const rows = projectId !== null
-    ? queryAll<{ id: string; name: string }>('SELECT id,name FROM projects WHERE id=?', [projectId])
-    : ids.length ? queryAll<{ id: string; name: string }>(`SELECT DISTINCT p.id,p.name FROM projects p JOIN recordings r ON r.project_id=p.id WHERE r.id IN (${ids.map(() => '?').join(',')}) ORDER BY p.name,p.id`, ids) : []
-  const projects = rows.map(project => ({
-    ...project,
-    recordingIds: ids.length ? queryAll<{ id: string }>(`SELECT id FROM recordings WHERE project_id=? AND id IN (${ids.map(() => '?').join(',')}) ORDER BY id`, [project.id, ...ids]).map(row => row.id) : [],
-    content: readReferenceContext(project.id).content
-  }))
-  return { global, projects }
+export function referenceContextSnapshot(projectId:string|null,recordingIds:string[]=[],noteIds:string[]=[]):ReferenceContextSnapshot {
+  const global=readReferenceContext(null),ids=[...new Set(recordingIds)].slice(0,6),notes=[...new Set(noteIds)].slice(0,6)
+  const related=new Set<string>()
+  if(projectId!==null)related.add(projectId)
+  else { for(const [table,selected] of [['recordings',ids],['written_notes',notes]] as const)if(selected.length)for(const row of queryAll<{project_id:string|null}>(`SELECT DISTINCT project_id FROM ${table} WHERE id IN (${selected.map(()=>'?').join(',')})`,selected))if(row.project_id)related.add(row.project_id) }
+  const projects=[...related].flatMap(id=>{const project=queryOne<{id:string;name:string}>('SELECT id,name FROM projects WHERE id=?',[id]);if(!project)return[];const document=readReferenceContext(id);return[{...project,recordingIds:ids.length?queryAll<{id:string}>(`SELECT id FROM recordings WHERE project_id=? AND id IN (${ids.map(()=>'?').join(',')}) ORDER BY id`,[id,...ids]).map(row=>row.id):[],...(notes.length?{noteIds:queryAll<{id:string}>(`SELECT id FROM written_notes WHERE project_id=? AND id IN (${notes.map(()=>'?').join(',')}) ORDER BY id`,[id,...notes]).map(row=>row.id)}:{}),version:document.version,content:document.content}]}).sort((a,b)=>a.name.localeCompare(b.name)||a.id.localeCompare(b.id))
+  return{global:global.content,globalVersion:global.version,projects}
 }

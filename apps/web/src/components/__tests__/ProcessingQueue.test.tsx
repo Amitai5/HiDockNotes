@@ -70,4 +70,14 @@ describe('visible transcription queue', () => {
     expect(screen.getByText('Transcript saved')).toBeVisible()
     expect(screen.getByText('Summary refresh · #1')).toBeVisible()
   })
+  it('shows every concurrent transcription and summary with its own progress', async () => {
+    const first = { ...state.queue!.active!, mode: 'process' as const }
+    state.queue = { waiting: 1, active: first, activeJobs: [first, { id: 'summary', title: 'Other meeting', stage: 'summarizing', mode: 'summarize', progress: 0.7, message: 'Summarizing the other recording', startedAt: null }] }
+    render(<MemoryRouter><ProcessingQueue /></MemoryRouter>)
+    expect(await screen.findByText('2 recordings processing')).toBeVisible()
+    expect(screen.getByText('1 transcribing · 1 summarizing')).toBeVisible()
+    expect(screen.getAllByRole('progressbar')).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Saved conversation' })).toBeVisible(); expect(screen.getByRole('link', { name: 'Other meeting' })).toBeVisible()
+  })
+
 })

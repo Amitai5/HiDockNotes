@@ -20,19 +20,18 @@ export function ProcessingQueue(): JSX.Element | null {
   }, [])
   const queue = state?.queue
   if (!state || !queue || !queue.active && !queue.waiting && !queue.reviewPaused) return null
-  const active = queue.active, summaries = queue.waitingSummaries ?? 0
+  const activeJobs = queue.activeJobs ?? (queue.active ? [queue.active] : []), active = activeJobs[0], summaries = queue.waitingSummaries ?? 0
   const summaryOnly = (summaries > 0 && queue.waitingTranscriptions === 0 || active?.mode === 'summarize') && !queue.waitingTranscriptions
   const ready = summaryOnly ? state.summaryReady : state.ready
   const reason = summaryOnly ? state.summaryReason : state.reason
-  const elapsed = active?.startedAt ? Math.max(0, (now - new Date(active.startedAt).getTime()) / 1000) : 0
-  const title = active ? active.mode === 'summarize' ? 'Refreshing a summary' : 'Processing your recordings' : queue.reviewPaused ? summaryOnly ? 'Summary refreshes are paused' : 'Background processing is paused' : ready ? summaryOnly ? 'Starting summary refreshes' : 'Starting transcription' : summaryOnly ? 'Summaries are waiting' : 'Transcription is waiting'
+  const title = activeJobs.length > 1 ? `${activeJobs.length} recordings processing` : active ? active.mode === 'summarize' ? 'Refreshing a summary' : 'Processing your recordings' : queue.reviewPaused ? summaryOnly ? 'Summary refreshes are paused' : 'Background processing is paused' : ready ? summaryOnly ? 'Starting summary refreshes' : 'Starting transcription' : summaryOnly ? 'Summaries are waiting' : 'Transcription is waiting'
   return <>
     <section className="processing-queue" aria-label="Processing queue" role="status">
-      <div className="queue-heading">{active ? <LoaderCircle className="animate-spin" size={18} /> : <Clock3 size={18} />}<div><strong>{title}</strong><p>{active ? active.message ?? active.stage : summaryOnly ? 'These recordings already have transcripts. Only their summaries are waiting to be refreshed.' : reason ?? 'Starting the background processor…'}</p></div><span>{summaryOnly ? `${summaries} summary refresh${summaries === 1 ? '' : 'es'}` : `${queue.waiting} waiting`}</span></div>
-      {active && <><div className="queue-recording"><Link to={`/library/${active.id}`}>{active.title}</Link><small>{elapsed > 0 ? `${formatDuration(elapsed)} elapsed · ` : ''}{active.mode === 'summarize' ? 'Using the saved transcript' : 'Audio is already saved on this computer'}</small></div><progress aria-label={`${active.stage} progress`} max={1} value={active.progress > 0 ? active.progress : undefined} /></>}
+      <div className="queue-heading">{active ? <LoaderCircle className="animate-spin" size={18} /> : <Clock3 size={18} />}<div><strong>{title}</strong><p>{activeJobs.length > 1 ? `${activeJobs.filter(job => job.mode !== 'summarize').length} transcribing · ${activeJobs.filter(job => job.mode === 'summarize').length} summarizing` : active ? active.message ?? active.stage : summaryOnly ? 'These recordings already have transcripts. Only their summaries are waiting to be refreshed.' : reason ?? 'Starting the background processor…'}</p></div><span>{summaryOnly ? `${summaries} summary refresh${summaries === 1 ? '' : 'es'}` : `${queue.waiting} waiting`}</span></div>
+      {activeJobs.map(active => { const elapsed = active.startedAt ? Math.max(0, (now - new Date(active.startedAt).getTime()) / 1000) : 0; return <div className="processing-active-job" key={active.id}><div className="queue-recording"><Link to={`/library/${active.id}`}>{active.title}</Link><small>{elapsed > 0 ? `${formatDuration(elapsed)} elapsed · ` : ''}{active.mode === 'summarize' ? 'Using the saved transcript' : 'Audio is already saved on your server'}</small></div><progress aria-label={`${active.stage} progress`} max={1} value={active.progress > 0 ? active.progress : undefined} /><p>{active.message ?? active.stage}</p></div> })}
       {!active && !ready && !queue.reviewPaused && <Link to="/settings?tab=ai">{summaryOnly ? 'Review summary settings' : 'Review transcription settings'}</Link>}
       <ProcessingControls state={state} onChanged={setState} allowCancelSummaries />
-      <small>{summaryOnly ? 'No new download or transcription is needed. Paused summary jobs do not block recorder operations.' : 'One recording runs at a time. Waiting recordings do not need another download.'}</small>
+      <small>{summaryOnly ? 'No new download or transcription is needed. Paused summary jobs do not block recorder operations.' : `Up to ${state.settings.maxConcurrentTranscriptions ?? 1} transcriptions and ${state.settings.maxConcurrentSummaries ?? 1} summaries at a time. Waiting recordings do not need another download.`}</small>
     </section>
   </>
 }

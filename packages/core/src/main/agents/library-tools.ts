@@ -1,3 +1,5 @@
+import type { WrittenNotes } from '../services/written-notes'
+import type { LibraryScope, NoteSearchOptions, NoteSearchPage } from '../../../src/shared/notes'
 import { validateId } from '../ipc/jensen-validation'
 import { AGENT_TOOL_CATALOG, type AgentToolName } from './tool-catalog'
 import { searchAgentRecordings, type AgentMeaningSearch } from './recording-search'
@@ -15,7 +17,7 @@ interface ActionRow { id: string; text: string; done: number; recordingId: strin
 const recordingColumns = 'r.id, r.filename, r.title, r.date_recorded AS recordedAt, r.duration_seconds AS durationSeconds, r.status, r.project_id AS projectId'
 const actionColumns = 'a.id, a.text, a.done, a.recording_id AS recordingId, a.start, a.created_at AS createdAt, a.due_date AS dueDate, a.completed_at AS completedAt'
 const statuses = ['device-only', 'downloaded', 'queued', 'converting', 'diarizing', 'transcribing', 'identifying', 'summarizing', 'done', 'failed', 'empty']
-interface AgentServices { meaningSearch?: AgentMeaningSearch; referenceContext?(projectId: string | null): ReferenceContextDocument }
+interface AgentServices { notes?: WrittenNotes; noteMeaningSearch?(options:NoteSearchOptions,signal?:AbortSignal):Promise<NoteSearchPage>; meaningSearch?: AgentMeaningSearch; referenceContext?(projectId: string | null): ReferenceContextDocument }
 
 function integer(value: unknown, fallback: number, min: number, max: number): number {
   if (value === undefined) return fallback
@@ -41,6 +43,9 @@ export class LibraryAgentTools {
     const input = (value ?? {}) as Record<string, unknown>
     if (Object.keys(input).some(key => !Object.hasOwn(tool.inputSchema.properties, key))) throw new Error('Unknown tool argument.')
     switch (name as AgentToolName) {
+      case 'list_notes': return this.notes(input)
+      case 'search_notes': return this.searchNotes(input,signal)
+      case 'get_note': return this.note(input)
       case 'list_projects': return this.projects(input)
       case 'list_recordings': return this.recordings(input)
       case 'search_recordings': return this.search(input, signal)
@@ -50,9 +55,24 @@ export class LibraryAgentTools {
       case 'list_action_items': return this.actions(input)
     }
   }
+  private noteScope(input:Record<string,unknown>):LibraryScope { return input.projectId===undefined?{kind:'all'}:input.projectId===null?{kind:'unfiled'}:{kind:'project',projectId:validateId(input.projectId)} }
+  private notes(input:Record<string,unknown>):unknown {
+    if(!this.services.notes)throw Error('Written notes are unavailable.')
+    return this.services.notes.list({scope:this.noteScope(input),limit:integer(input.limit,20,1,50),cursor:input.cursor as string|undefined})
+  }
+  private searchNotes(input:Record<string,unknown>,signal?:AbortSignal):unknown {
+    if(!this.services.notes)throw Error('Written notes are unavailable.')
+    const options:NoteSearchOptions={query:input.query as string,scope:this.noteScope(input),limit:integer(input.limit,20,1,50),cursor:input.cursor as string|undefined,mode:input.mode as 'keywords'|'meaning'|undefined}
+    return options.mode==='meaning'&&this.services.noteMeaningSearch?this.services.noteMeaningSearch(options,signal):this.services.notes.search(options)
+  }
+  private note(input:Record<string,unknown>):unknown {
+    if(!this.services.notes)throw Error('Written notes are unavailable.')
+    if(input.includeDocument!==undefined&&typeof input.includeDocument!=='boolean')throw Error('includeDocument must be a boolean.')
+    return this.services.notes.readPage(validateId(input.noteId),{revision:input.revision===undefined?undefined:integer(input.revision,1,1,Number.MAX_SAFE_INTEGER),limit:integer(input.limit,20,1,50),cursor:input.cursor as string|undefined,includeDocument:input.includeDocument as boolean|undefined})
+  }
   private projects(input: Record<string, unknown>): unknown {
     const { limit, offset } = page(input)
-    const rows = this.database.all<{ id: string; name: string; count: number }>('SELECT p.id, p.name, count(r.id) AS count FROM projects p LEFT JOIN recordings r ON r.project_id=p.id GROUP BY p.id ORDER BY p.name, p.id LIMIT ? OFFSET ?', [limit + 1, offset])
+    const rows = this.database.all<{ id: string; name: string; count: number }>('SELECT p.id,p.name,(SELECT count(*) FROM recordings r WHERE r.project_id=p.id) AS count,(SELECT count(*) FROM written_notes n WHERE n.project_id=p.id) AS noteCount,((SELECT count(*) FROM recordings r WHERE r.project_id=p.id)+(SELECT count(*) FROM written_notes n WHERE n.project_id=p.id)) AS itemCount FROM projects p ORDER BY p.name,p.id LIMIT ? OFFSET ?', [limit + 1, offset])
     return { projects: rows.slice(0, limit), nextOffset: rows.length > limit ? offset + limit : null }
   }
   private recordings(input: Record<string, unknown>): unknown {

@@ -18,6 +18,14 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('reference context editors', () => {
+  it('opens global context inside the project dialog and preserves the separate project draft', async () => {
+    get.mockImplementation(async(projectId:string|null)=>({...empty(),content:{...EMPTY_REFERENCE_CONTEXT,background:projectId?'Project facts':'Global facts'}}))
+    render(<ProjectReferenceContext projectId="project-a" name="Client project" />);fireEvent.click(screen.getByRole('button',{name:'Project context'}));await screen.findByDisplayValue('Project facts');fireEvent.change(screen.getByLabelText('Project background'),{target:{value:'Project draft'}})
+    fireEvent.click(screen.getByRole('button',{name:'Global context'}));expect(await screen.findByDisplayValue('Global facts')).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Close global context'}));expect(screen.getByLabelText('Project background')).toHaveValue('Project draft');expect(save).not.toHaveBeenCalled()
+  })
+  it('can discard a dirty project on close without making a save request', async()=>{
+    render(<ProjectReferenceContext projectId="project-a" name="Client project" />);fireEvent.click(screen.getByRole('button',{name:'Project context'}));await waitFor(()=>expect(screen.getByLabelText('Project background')).toBeEnabled());fireEvent.change(screen.getByLabelText('Project background'),{target:{value:'Discard me'}});fireEvent.click(screen.getByRole('button',{name:'Close project context'}));fireEvent.click(screen.getAllByRole('button',{name:'Discard changes'}).at(-1)!);expect(screen.queryByRole('dialog')).toBeNull();expect(save).not.toHaveBeenCalled()
+  })
   it('saves all global fields explicitly without starting processing', async () => {
     render(<GlobalReferenceContext />)
     await waitFor(() => expect(screen.getByLabelText('Global background')).toBeEnabled())
@@ -38,7 +46,7 @@ describe('reference context editors', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Project context' }))
     expect(await screen.findByDisplayValue('Existing term')).toBeVisible()
     expect(get).toHaveBeenCalledWith('project-a')
-    expect(screen.getByRole('link', { name: /Edit global context/ })).toHaveAttribute('href', '/settings?tab=general&focus=global-context')
+    expect(screen.getByRole('button', { name: 'Global context' })).toBeVisible()
     fireEvent.change(screen.getByLabelText('Project background'), { target: { value: 'This client only' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save project context' }))
     await screen.findByText('Context saved')
@@ -50,7 +58,8 @@ describe('reference context editors', () => {
     await waitFor(() => expect(screen.getByLabelText('Project background')).toBeEnabled())
     fireEvent.change(screen.getByLabelText('Project background'), { target: { value: 'Unfinished draft' } })
     fireEvent.click(screen.getByRole('button', { name: 'Close project context' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Project context' }))
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Keep your context changes?')
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
     expect(screen.getByLabelText('Project background')).toHaveValue('Unfinished draft')
     expect(get).toHaveBeenCalledOnce()
     expect(save).not.toHaveBeenCalled()
