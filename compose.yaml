@@ -1,6 +1,6 @@
 services:
   hidocknotes:
-    image: ghcr.io/amitai5/hidocknotes:${HIDOCKNOTES_VERSION:-0.16.4}
+    image: ghcr.io/amitai5/hidocknotes:${HIDOCKNOTES_VERSION:-0.16.5}
     restart: unless-stopped
     init: true
     user: "${PUID:-1000}:${PGID:-1000}"

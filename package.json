@@ -1,6 +1,6 @@
 {
   "name": "hidocknotes",
-  "version": "0.16.4",
+  "version": "0.16.5",
   "private": true,
   "license": "MIT",
   "packageManager": "npm@11.21.0",

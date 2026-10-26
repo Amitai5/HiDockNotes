@@ -2,7 +2,7 @@
 
 ## Saved Assistant conversations
 
-Use **New chat** to start another conversation and **Chat history** to search, reopen, rename, or delete one. A chat keeps its project scope; changing the project selector starts a separate conversation. Answers retain their Markdown, citations, source timestamps, and excerpts. Older messages load in pages.
+Use **New chat** to start another conversation and **Chat history** to search, reopen, rename, or delete one. A chat keeps its project scope; changing the project selector starts a separate conversation. Answers retain their Markdown, citations, source timestamps, and excerpts. Older messages load in pages. Chat refreshes omit the optional history cursor; the server also accepts a null cursor from older cached clients as a request for the latest page. Required write revisions stay strict, so stale sends and renames cannot overwrite newer messages.
 
 Completed exchanges are saved atomically. Failed or stopped requests leave their question available to retry, without automatically sending it again after a restart. Renaming/deleting a chat is blocked while its answer is running, and stale writes cannot replace newer messages. **Stop answer** cancels the current request. Removing a source recording redacts saved answers that cited it and removes their copied excerpts.
 
