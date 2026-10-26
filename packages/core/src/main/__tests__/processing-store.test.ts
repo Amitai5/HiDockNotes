@@ -27,6 +27,22 @@ describe('saving regenerated meeting notes', () => {
     saveProcessingResult(id, { ...checkpoint, transcriptChanged: false, empty: false, summary }, DEFAULT_AI_SETTINGS)
     expect(getDetail(id).tags).toEqual(['Planning', 'operations', 'meeting'])
   })
+  it('names an automatic placeholder on summary-only completion and keeps later manual edits', () => {
+    const id = upsertRecordingFromDevice({ filename: 'fixture.hda', size: 100, duration: 10, dateCreated: new Date('2026-10-07T10:00:00Z') }).id
+    run("UPDATE recordings SET title='fixture.hda',title_source='placeholder' WHERE id=?", [id])
+    const checkpoint = { duration: 10, speakers: [], segments: [{ id: 'segment', start: 1, end: 2, text: 'Actual saved words', speakerId: null, speakerName: null }] }
+    saveTranscript(id, checkpoint, DEFAULT_AI_SETTINGS)
+    const before = queryOne('SELECT * FROM transcripts WHERE recording_id=?', [id])
+    const summary = { title: 'Generated Topic Name', summary: 'Saved notes.', actionItems: [] }
+
+    saveProcessingResult(id, { ...savedTranscript(id), transcriptChanged: false, empty: false, summary }, DEFAULT_AI_SETTINGS)
+
+    expect(queryOne('SELECT title,title_source FROM recordings WHERE id=?', [id])).toEqual({ title: summary.title, title_source: 'ai' })
+    expect(queryOne('SELECT * FROM transcripts WHERE recording_id=?', [id])).toEqual(before)
+    renameRecording(id, 'fixture.hda')
+    saveProcessingResult(id, { ...savedTranscript(id), transcriptChanged: false, empty: false, summary: { ...summary, title: 'Next Topic Name' } }, DEFAULT_AI_SETTINGS)
+    expect(queryOne('SELECT title,title_source FROM recordings WHERE id=?', [id])).toEqual({ title: 'fixture.hda', title_source: 'manual' })
+  })
   it('persists structured outcomes with their notes and replaces them when notes are regenerated', () => {
     const id = upsertRecordingFromDevice({ filename: 'outcomes.hda', size: 10, duration: 10, dateCreated: new Date('2026-10-07T10:00:00Z') }).id
     const checkpoint = { duration: 10, speakers: [], segments: [{ id: 'segment', start: 1, end: 2, text: 'We approved the pilot.', speakerId: null, speakerName: null }] }

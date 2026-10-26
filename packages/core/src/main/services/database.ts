@@ -121,7 +121,22 @@ const migrations = [
    CREATE UNIQUE INDEX upload_request_identity ON server_uploads(request_id) WHERE request_id IS NOT NULL;
    ALTER TABLE transcription_jobs ADD COLUMN context_snapshot TEXT;`,
   // Data-only migration; the shared title normalizer runs in this transaction below.
-  `SELECT 1;`
+  `SELECT 1;`,
+  // Default import/capture names are replaceable; actual renames stay manual.
+  // Only provenance changes here. Titles change on a later summary completion.
+  `UPDATE recordings SET title_source='placeholder'
+   WHERE title_source='manual' AND EXISTS (
+     SELECT 1 FROM server_uploads u WHERE u.recording_id=recordings.id
+     AND u.state='completed' AND u.filename=recordings.title
+   );
+   UPDATE recordings SET title_source='placeholder'
+   WHERE title_source IS NULL AND EXISTS (
+     SELECT 1 FROM server_captures c WHERE c.recording_id=recordings.id
+     AND c.state='completed' AND recordings.filename=c.id||'.wav'
+   ) AND (
+     title='Live recording '||strftime('%Y-%m-%dT%H:%M:%fZ',substr(title,16))
+     OR title='Interrupted capture '||strftime('%Y-%m-%dT%H:%M:%fZ',substr(title,21))
+   );`
 ]
 
 export const DATABASE_SCHEMA_VERSION = migrations.length

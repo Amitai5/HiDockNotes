@@ -38,7 +38,7 @@ export function saveProcessingResult(id: string, result: ProcessingResult, setti
     if (result.summary) {
       run('INSERT INTO recording_overviews(recording_id,summary_version) VALUES (?,?) ON CONFLICT(recording_id) DO UPDATE SET summary_version=excluded.summary_version', [id, transcriptVersion(id)])
       const recording = queryOne<Recording & { title_source: string | null }>('SELECT * FROM recordings WHERE id=?', [id])
-      if (recording && (!recording.title || recording.title_source === 'ai')) run("UPDATE recordings SET title=?, title_source='ai' WHERE id=?", [result.summary.title, id])
+      if (recording && (!recording.title || recording.title_source === 'ai' || recording.title_source === 'placeholder')) run("UPDATE recordings SET title=?, title_source='ai' WHERE id=?", [result.summary.title, id])
       const outcomes = result.summary.outcomes ?? legacyMeetingOutcomes(result.summary.summary)
       run('INSERT INTO summaries(id, recording_id, text, template, outcomes) VALUES (?, ?, ?, ?, ?) ON CONFLICT(recording_id) DO UPDATE SET text=excluded.text, template=excluded.template, outcomes=excluded.outcomes', [randomUUID(), id, result.summary.summary, settings.summaryTemplate, JSON.stringify(outcomes)])
       if (result.summary.meetingType && result.summary.participants) run('INSERT INTO recording_overviews(recording_id,meeting_type,participants) VALUES (?,?,?) ON CONFLICT(recording_id) DO UPDATE SET meeting_type=excluded.meeting_type,participants=excluded.participants', [id, result.summary.meetingType, JSON.stringify(result.summary.participants)])
