@@ -1,8 +1,9 @@
 import { appClient } from '../services/app-client'
+import { libraryUrl } from '../services/note-url'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CalendarDays, CheckCircle2, FileText, Folder, ListChecks, LoaderCircle, Pause, Pencil, Play, SkipBack, Sparkles, Tags, UsersRound, Volume2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import type { ProjectView, RecordingDetail, TranscriptSegment } from '../shared/contracts'
+import type { ProjectView, RecordingDetail, RecordingView, TranscriptSegment } from '../shared/contracts'
 import type { AIState, SpeakerView } from '../shared/ai'
 import { Button, formatDuration } from '../components/ui'
 import { RecordingTitle } from '../components/RecordingTitle'
@@ -20,11 +21,11 @@ import { TranscriptTools } from '../components/TranscriptTools'
 import { RecordingCalendar } from '../components/RecordingCalendar'
 
 const ACTIVE_STAGES = ['queued', 'converting', 'diarizing', 'transcribing', 'identifying', 'summarizing']
-export function RecordingPage(): JSX.Element {
+export function RecordingPage({ onRecordingChange }: { onRecordingChange?(recording: RecordingView): void } = {}): JSX.Element {
   const { id } = useParams()
-  return id ? <RecordingContent key={id} id={id} /> : <div className="page"><p className="muted">Recording was not found.</p></div>
+  return id ? <RecordingContent key={id} id={id} onRecordingChange={onRecordingChange} /> : <div className="page"><p className="muted">Recording was not found.</p></div>
 }
-function RecordingContent({ id }: { id: string }): JSX.Element {
+function RecordingContent({ id, onRecordingChange }: { id: string; onRecordingChange?(recording: RecordingView): void }): JSX.Element {
   const navigate = useNavigate()
   const deleting = useRef(false)
   const [query] = useSearchParams()
@@ -56,6 +57,7 @@ function RecordingContent({ id }: { id: string }): JSX.Element {
     if (id && detail?.recording.hasAudio) void appClient.library.waveform(id).then(value => { if (mounted && !deleting.current) setWaveform(value) }).catch(error => { if (mounted && !deleting.current) reportError(error) })
     return () => { mounted = false }
   }, [id, detail?.recording.hasAudio])
+  useEffect(() => { if (detail) onRecordingChange?.(detail.recording) }, [detail?.recording, onRecordingChange])
   const duration = waveform?.duration ?? detail?.recording.duration ?? 0
   async function process(): Promise<void> { if (!id) return; setBusy(true); try { await appClient.ai.process(id); refresh() } catch (error) { reportError(error) } finally { setBusy(false) } }
   function openSpeaker(value: SpeakerEdit): void { speakerTrigger.current = document.activeElement as HTMLElement | null; setSpeaker(value) }
@@ -70,8 +72,8 @@ function RecordingContent({ id }: { id: string }): JSX.Element {
   const pendingSummary = detail.recording.status === 'done' && !detail.recording.summary && detail.segments.length > 0
   return <>
     <RecordingWorkspace notes={<div className="page recording-detail">
-    <Link className="back-link" to="/library"><ArrowLeft size={15} />Library</Link>
-    <div className="page-heading"><div><RecordingTitle id={id} title={detail.recording.title || detail.recording.filename} onSaved={refresh} /><p className="recording-verification">{detail.recording.verified && <><CheckCircle2 size={12} />Local copy verified</>}</p></div><RecordingActions key={id} recording={detail.recording} canSummarize={!detail.deletionPending && !active && detail.segments.length > 0 && !!ai?.summaryReady} canTranscribe={!detail.deletionPending && !active && detail.recording.verified && detail.recording.hasAudio && !!ai?.ready && !!ai?.summaryReady} canProcess={canProcess} processReady={!!ai?.ready} retry={retry} busy={busy} onProcess={() => { void process() }} onQueued={refresh} onDeleting={value => { deleting.current = value; suspend(value) }} onDeleted={() => navigate(detail.recording.projectId ? `/library?project=${detail.recording.projectId}` : '/library')} /></div>
+    <Link className="back-link" to={libraryUrl(detail.recording.projectId)}><ArrowLeft size={15} />Back to {projects.find(project => project.id === detail.recording.projectId)?.name ?? (detail.recording.projectId ? 'project' : 'Unfiled items')}</Link>
+    <div className="page-heading"><div><RecordingTitle id={id} title={detail.recording.title || detail.recording.filename} onSaved={refresh} /><p className="recording-verification">{detail.recording.verified && <><CheckCircle2 size={12} />Local copy verified</>}</p></div><RecordingActions key={id} expectedSpeakers={detail.expectedSpeakers} recording={detail.recording} canSummarize={!detail.deletionPending && !active && detail.segments.length > 0 && !!ai?.summaryReady} canTranscribe={!detail.deletionPending && !active && detail.recording.verified && detail.recording.hasAudio && !!ai?.ready && !!ai?.summaryReady} canProcess={canProcess} processReady={!!ai?.ready} retry={retry} busy={busy} onProcess={() => { void process() }} onQueued={refresh} onDeleting={value => { deleting.current = value; suspend(value) }} onDeleted={() => navigate(libraryUrl(detail.recording.projectId))} /></div>
     <dl className="recording-overview" aria-label="Recording overview">
       <div><dt><CalendarDays size={14} />Recorded</dt><dd><time dateTime={detail.recording.recordedAt}>{new Date(detail.recording.recordedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</time><small>{new Date(detail.recording.recordedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} · {formatDuration(duration)}</small></dd></div>
       <div><dt><Folder size={14} />Project</dt><dd><Link className="metadata-project" to={detail.recording.projectId ? `/library?project=${encodeURIComponent(detail.recording.projectId)}` : '/library?scope=unfiled'}>{projects.find(project => project.id === detail.recording.projectId)?.name ?? (detail.recording.projectId ? 'Project folder' : 'Unfiled')}</Link></dd></div>

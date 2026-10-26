@@ -3,17 +3,18 @@ import { appClient, setAppClient } from '../../services/app-client'
 import '@testing-library/jest-dom/vitest'
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ActivityLog } from '../ActivityLog'
 import { getHiDockDeviceService } from '../../services/hidock-device'
 import { useAppStore } from '../../store/useAppStore'
 import { clearAllActivityBuffers } from '../../hooks/useDeviceSubscriptions'
+import { DEFAULT_AI_SETTINGS } from '../../shared/ai'
 
 const entry = { id: 'entry', timestamp: '2026-10-07T10:00:00Z', type: 'info' as const, category: 'Device', message: 'Downloaded a recording' }
 beforeEach(() => {
   clearAllActivityBuffers()
   useAppStore.setState({ activityOpen: true })
-  setAppClient({ activity: { clear: vi.fn().mockResolvedValue(undefined) }, devicePipeline: { getState: vi.fn(async () => ({ phase: 'idle', error: null })), onState: vi.fn(() => vi.fn()) }, ai: { getState: vi.fn(async () => ({ queue: { waiting: 2, waitingSummaries: 2, waitingTranscriptions: 0, reviewPaused: true, active: null } })) }, library: { onChanged: vi.fn(() => vi.fn()) } } as unknown as Window['electronAPI'])
+  setAppClient({ activity: { clear: vi.fn().mockResolvedValue(undefined) }, devicePipeline: { getState: vi.fn(async () => ({ phase: 'idle', error: null })), onState: vi.fn(() => vi.fn()) }, ai: { getState: vi.fn(async () => ({ settings: DEFAULT_AI_SETTINGS, ready: false, summaryReady: false, queue: { waiting: 2, waitingSummaries: 2, waitingTranscriptions: 0, reviewPaused: true, active: null } })) }, library: { onChanged: vi.fn(() => vi.fn()) } } as unknown as Window['electronAPI'])
 })
 afterEach(cleanup)
 describe('Activity Log safety and interaction', () => {
@@ -50,8 +51,19 @@ describe('Activity Log safety and interaction', () => {
   it('shows current recorder and paused summary status even when the historical log is empty', async () => {
     render(<ActivityLog />)
     expect(await screen.findByText('Recorder ready')).toBeVisible()
-    expect(screen.getByText(/2 summary refreshes waiting/)).toBeVisible()
+    expect(await screen.findByRole('status', { name: 'Processing queue' })).toHaveTextContent('2 summary refreshes')
     expect(screen.getByText('No logged events')).toBeVisible()
     expect(screen.queryByText('All clear')).toBeNull()
+  })
+  it('resumes the paused queue from inside Activity only after confirming its nested dialog', async () => {
+    appClient.ai.resumeReview = vi.fn(async () => ({ settings: DEFAULT_AI_SETTINGS, providers: [], ready: true, reason: null, summaryReady: true, queue: { waiting: 0, active: null, reviewPaused: false } }))
+    render(<ActivityLog />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume processing', exact: true }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Resume background processing?' })).getByRole('button', { name: 'Keep paused' }))
+    expect(appClient.ai.resumeReview).not.toHaveBeenCalled(); expect(useAppStore.getState().activityOpen).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Resume processing', exact: true }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Resume background processing?' })).getByRole('button', { name: 'Resume processing', exact: true }))
+    await waitFor(() => expect(appClient.ai.resumeReview).toHaveBeenCalledWith(true)); expect(useAppStore.getState().activityOpen).toBe(true)
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Processing queue' })).toBeNull())
   })
 })

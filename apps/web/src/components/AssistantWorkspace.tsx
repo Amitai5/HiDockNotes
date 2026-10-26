@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { uiScale } from '../services/ui-scale'
 
 const MIN_SOURCE = 280
 const DEFAULT_SOURCE = 370
@@ -23,7 +24,7 @@ export function AssistantWorkspace({ chat, source }: { chat: ReactNode; source: 
     {chat}
     {source && <><div className="assistant-source-resizer" role="separator" aria-label="Resize source panel" aria-orientation="vertical" aria-valuemin={MIN_SOURCE} aria-valuemax={maximum} aria-valuenow={width} tabIndex={0}
       onPointerDown={event => { if (event.button !== 0) return; drag.current = { x: event.clientX, width }; setResizing(true); event.currentTarget.setPointerCapture?.(event.pointerId); event.preventDefault() }}
-      onPointerMove={event => { if (drag.current) resize(drag.current.width + drag.current.x - event.clientX) }}
+      onPointerMove={event => { if (drag.current) resize(drag.current.width + (drag.current.x - event.clientX) / uiScale()) }}
       onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag} onDoubleClick={() => resize(DEFAULT_SOURCE)} onKeyDown={event => {
         const next = event.key === 'ArrowLeft' ? width + 20 : event.key === 'ArrowRight' ? width - 20 : event.key === 'Home' ? MIN_SOURCE : event.key === 'End' ? maximum : null
         if (next !== null) { event.preventDefault(); resize(next) }

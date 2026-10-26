@@ -43,6 +43,12 @@ export function parseGeminiTranscript(value: unknown, duration: number): Transcr
   if (!unique.length) throw new ProcessingError('Gemini returned no word timestamps. Choose Gemini 3.5 Transcribe and retry.')
   return { text: unique.map(w => w.text).join(' '), words: unique, segments: [] }
 }
+function conciseRecordingTitle(value: string): string {
+  const title = value.trim().split(/\s+/u).slice(0, 6).join(' ')
+  if (Array.from(title).length <= 60) return title
+  const prefix = Array.from(title).slice(0, 60).join('')
+  return prefix.replace(/\s+\S*$/u, '') || prefix
+}
 export function parseSummary(text: string, duration: number, evidence?: TranscriptSegment[]): SummaryResult {
   let value: unknown
   try { value = JSON.parse(text) } catch { throw new ProcessingError('The summary response was incomplete. Retry to generate the summary again.', true) }
@@ -57,7 +63,7 @@ export function parseSummary(text: string, duration: number, evidence?: Transcri
     const owner = typeof action.owner === 'string' && action.owner.trim() && (!evidence || groundedName(action.owner, evidence)) ? action.owner.trim() : null
     return { text: action.text.trim(), start: action.start as number | null, ...(action.owner === undefined ? {} : { owner }), ...(action.dueDate === undefined ? {} : { dueDate: action.dueDate as string | null }) }
   })
-  const summary: SummaryResult = { title: item.title.trim().slice(0, 200), summary: item.summary.trim(), actionItems }
+  const summary: SummaryResult = { title: conciseRecordingTitle(item.title), summary: item.summary.trim(), actionItems }
   if (item.outcomes !== undefined) {
     if (!Array.isArray(item.outcomes) || item.outcomes.length > 80) throw new ProcessingError('The summary contained invalid meeting outcomes. Retry to generate it again.', true)
     summary.outcomes = parseSummaryOutcomes(item.outcomes, evidence ?? [])

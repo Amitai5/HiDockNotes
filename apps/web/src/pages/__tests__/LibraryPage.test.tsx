@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { appClient, setAppClient } from '../../services/app-client'
@@ -18,6 +18,11 @@ import { EMPTY_REFERENCE_CONTEXT } from '../../shared/reference-context'
 vi.mock('../../components/ProcessingQueue', () => ({ ProcessingQueue: () => null }))
 vi.mock('../../hooks/useSemanticSearch', () => ({ useSemanticSearch: () => ({ enabled: false, modelReady: false }) }))
 vi.mock('../../components/NoteEditor', () => ({ default: ({ note }: { note: { id: string } }) => <p data-testid="selected-note">{note.id}</p>, HistoricalNote: () => null }))
+vi.mock('../RecordingPage', () => ({ RecordingPage: ({ onRecordingChange }: { onRecordingChange?(recording: RecordingView): void }) => {
+  const { id } = useParams()
+  useEffect(() => { const value = rows.find(row => row.kind === 'recording' && row.id === id); if (value?.kind === 'recording') onRecordingChange?.(value.recording) }, [id, onRecordingChange])
+  return <h2>Opened recording {id}</h2>
+} }))
 let rows: LibraryContentRow[], changed: (() => void)[]
 const create = vi.fn(), content = vi.fn()
 const projects = [{ id: 'team', name: 'Team', count: 1, noteCount: 1, itemCount: 2 }, { id: 'empty', name: 'Empty project', count: 0, noteCount: 0, itemCount: 0 }]
@@ -32,6 +37,26 @@ beforeEach(() => {
 afterEach(cleanup)
 function Location(): JSX.Element { const location = useLocation(); return <p data-testid="route">{location.pathname + location.search}</p> }
 function show(path = '/library') { return render(<MemoryRouter initialEntries={[path]}><LibraryNavigationProvider><aside aria-label="Navigation"><LibrarySidebar /></aside><main><Routes><Route path="/library" element={<LibraryPage />} /><Route path="/notes/:noteId" element={<Location />} /><Route path="/library/:id" element={<Location />} /></Routes></main></LibraryNavigationProvider></MemoryRouter>) }
+function showWorkspace(path: string) { return render(<MemoryRouter initialEntries={[path]}><LibraryNavigationProvider><Location /><Routes><Route path="/library" element={<LibraryPage />} /><Route path="/notes/:noteId" element={<LibraryPage />} /><Route path="/library/:id" element={<LibraryPage />} /></Routes></LibraryNavigationProvider></MemoryRouter>) }
+describe('shared notes and recordings workspace', () => {
+  it('keeps both item types in the rail when switching the adjacent document', async () => {
+    appClient.notes.get = vi.fn(async id => ({ kind: 'note', id, title: 'Prepared brief', projectId: 'team', projectName: 'Team', revision: 4 } as never))
+    showWorkspace('/library?project=team')
+    fireEvent.click(await screen.findByRole('link', { name: /Project call/ })); expect(await screen.findByRole('heading', { name: 'Opened recording call' })).toBeVisible()
+    expect(screen.getByRole('complementary', { name: 'Project contents' })).toContainElement(screen.getByRole('link', { name: /Prepared brief/ }))
+    expect(screen.getByRole('link', { name: /Project call/ })).toHaveAttribute('aria-current', 'page')
+    fireEvent.click(screen.getByRole('link', { name: /Prepared brief/ })); expect(await screen.findByTestId('selected-note')).toHaveTextContent('written')
+    expect(screen.getByRole('link', { name: /Prepared brief/ })).toHaveAttribute('aria-current', 'page'); expect(screen.getByRole('link', { name: /Project call/ })).toBeVisible()
+    expect(screen.queryByRole('status', { name: 'Processing queue' })).toBeNull()
+  })
+  it('opens an older recording deep link in its actual project while preserving timestamp parameters', async () => {
+    showWorkspace('/library/call?t=17')
+    await screen.findByRole('heading', { name: 'Opened recording call' })
+    await waitFor(() => expect(screen.getByTestId('route')).toHaveTextContent('/library/call?t=17&project=team'))
+    expect(screen.getByRole('link', { name: /Project call/ })).toHaveAttribute('aria-current', 'page')
+    expect(await screen.findByRole('heading', { name: 'Team', level: 1 })).toBeVisible()
+  })
+})
 describe('mixed library workspace and flat navigation', () => {
   it('does not redirect a newly selected note into the previous note’s project', async () => {
     const observed: string[] = []

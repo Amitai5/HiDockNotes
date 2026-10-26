@@ -11,6 +11,15 @@ import { summaryInstructions, SUMMARY_SCHEMA } from '../ai/providers'
 vi.mock('node:fs', async () => { const { Readable } = await import('node:stream'); return { ...(await vi.importActual<typeof import('node:fs')>('node:fs')), createReadStream: vi.fn(() => Readable.from(Buffer.from('synthetic audio'))) } })
 
 describe('provider timestamp contracts', () => {
+  it('keeps generated recording titles to six words and sixty characters', () => {
+    const parseTitle = (title: string) => parseSummary(JSON.stringify({ title, summary: 'Saved summary.', actionItems: [] }), 5).title
+    expect(parseTitle('HubSpot Intake Workflow and Form Design Review')).toBe('HubSpot Intake Workflow and Form Design')
+    expect(parseTitle('  Client   intake  ')).toBe('Client intake')
+    expect(parseTitle('A'.repeat(70))).toHaveLength(60)
+    expect(Array.from(parseTitle('🎙'.repeat(70)))).toHaveLength(60)
+    expect(parseTitle('Internationalization Internationalization Internationalization')).toBe('Internationalization Internationalization')
+    expect(summaryInstructions(DEFAULT_AI_SETTINGS)).toContain('3–6 word topic name, at most 60 characters')
+  })
   it('reads Gemini word_info annotations from multiple interaction steps', () => {
     const result = parseGeminiTranscript({ steps: [{ content: [{ annotations: [{ type: 'word_info', text: 'Hello', start_offset: '0.1s', end_offset: '0.45s' }] }] }, { content: [{ annotations: [{ type: 'word_info', text: 'Dana.', start_offset: '0.5s', end_offset: '0.9s' }] }] }] }, 2)
     expect(result.words).toEqual([{ start: 0.1, end: 0.45, text: 'Hello' }, { start: 0.5, end: 0.9, text: 'Dana.' }])

@@ -6,8 +6,9 @@ import type { RecordingReprocessMode } from '../shared/meeting'
 import { RecordingDelete } from './RecordingDelete'
 import { RecordingExport } from './RecordingExport'
 import { RecordingReprocess } from './RecordingReprocess'
+import { uiScale } from '../services/ui-scale'
 
-export function RecordingActions({ recording, canSummarize, canTranscribe, canProcess, processReady, retry, busy, onProcess, onQueued, onDeleting, onDeleted }: { recording: RecordingView; canSummarize: boolean; canTranscribe: boolean; canProcess: boolean; processReady: boolean; retry: boolean; busy: boolean; onProcess(): void; onQueued(): void; onDeleting?(value: boolean): void; onDeleted?(): void }): JSX.Element {
+export function RecordingActions({ expectedSpeakers, recording, canSummarize, canTranscribe, canProcess, processReady, retry, busy, onProcess, onQueued, onDeleting, onDeleted }: { expectedSpeakers?: number | null; recording: RecordingView; canSummarize: boolean; canTranscribe: boolean; canProcess: boolean; processReady: boolean; retry: boolean; busy: boolean; onProcess(): void; onQueued(): void; onDeleting?(value: boolean): void; onDeleted?(): void }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [action, setAction] = useState<RecordingReprocessMode | 'export' | 'delete' | null>(null)
   const [position, setPosition] = useState({ left: 0, top: 0 })
@@ -28,7 +29,8 @@ export function RecordingActions({ recording, canSummarize, canTranscribe, canPr
     const rect = trigger.current?.getBoundingClientRect()
     if (!rect) return
     last.current = focusLast
-    setPosition({ left: Math.max(8, Math.min(window.innerWidth - 232, rect.right - 224)), top: rect.bottom + 8 })
+    const scale = uiScale()
+    setPosition({ left: Math.max(8, Math.min(window.innerWidth / scale - 232, rect.right / scale - 224)), top: rect.bottom / scale + 8 })
     setOpen(true)
   }
   useEffect(() => {
@@ -74,7 +76,7 @@ export function RecordingActions({ recording, canSummarize, canTranscribe, canPr
       const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
       buttons[next].focus()
     }}>{items.map(item => <button key={item.label} type="button" role="menuitem" tabIndex={-1} disabled={item.disabled} onClick={() => { setOpen(false); item.select() }}>{item.icon}<span>{item.label}</span></button>)}</div>, document.body)}
-    <RecordingReprocess id={recording.id} canSummarize={canSummarize} canTranscribe={canTranscribe} onQueued={onQueued} mode={action === 'summarize' || action === 'transcribe' ? action : null} onModeChange={setAction} onClosed={restoreDialogFocus} />
+    <RecordingReprocess id={recording.id} expectedSpeakers={expectedSpeakers} canSummarize={canSummarize} canTranscribe={canTranscribe} onQueued={onQueued} mode={action === 'summarize' || action === 'transcribe' ? action : null} onModeChange={setAction} onClosed={restoreDialogFocus} />
     <RecordingDelete recording={recording} open={action === 'delete'} onOpenChange={value => setAction(value ? 'delete' : null)} onClosed={restoreDialogFocus} onDeleting={onDeleting} onDeleted={onDeleted} />
     <RecordingExport recording={recording} open={action === 'export'} onOpenChange={value => setAction(value ? 'export' : null)} onClosed={restoreDialogFocus} />
   </div>
