@@ -1,0 +1,11 @@
+# Updating the web interface
+
+After deploying a newer Docker image, the website/PWA downloads a waiting interface update and offers Update app in the notice and Settings. The button activates the waiting worker, waits for activation to finish, then reloads the current URL. This works for a window left open since its first installation, and for a stale notice after another tab already activated the update. It does not rely on Workbox's controlling/isUpdate heuristic to decide whether to reload.
+
+The notice and Settings share progress and prevent duplicate update requests. If activation stalls for 15 seconds, the controls become usable again with a connection/retry message. A redundant or unavailable worker also produces visible feedback. The generated worker claims clients after activation, while prompt registration still leaves activation under the user's control. No automatic skipWaiting or scheduled reload is enabled.
+
+USB sync/live capture and pending, failed or conflicted note saves block the update before activation. The same guards run again before reloading, in case work began while activation was pending. Other open tabs show the update notice and retain their own reload choice, so one tab's update does not force another tab to reload with an unsaved draft. Cookies, drafts, IndexedDB, recording data and settings are not cleared. Desktop service workers remain disabled; the hosted desktop loads its interface from the server when reopened. Insecure LAN HTTP continues to require a normal page reload.
+
+For a window still running the old broken button, save pending notes and finish device transfers, then hard-refresh once after deploying the fix (Ctrl+Shift+R in Chrome/Edge), or close/reopen the PWA with other app windows closed. That loads the fixed updater. This button refreshes the interface served by your Docker deployment; server-image upgrades still use TrueNAS's pull/redeploy flow.
+
+The fix adds no dependency, public API or database migration. Normal polling remains hourly and on focus; update/reload work happens only after the user's button click. Verification uses two real production interface builds and native service-worker activation, including multiple tabs, blocked note saves, an already-active update and stalled-message retry.
