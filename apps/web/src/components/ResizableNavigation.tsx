@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 const MIN_NAVIGATION = 200
-const DEFAULT_NAVIGATION = 232
+const DEFAULT_NAVIGATION = 256
 export function ResizableNavigation({ children }: { children: ReactNode }): JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; width: number } | null>(null)

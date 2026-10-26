@@ -9,6 +9,12 @@ import { projectNoteBlocks, validateNoteDocument } from '../../shared/note-docum
 afterEach(cleanup)
 const document: NoteDocument = { type: 'doc', content: [{ type: 'heading', attrs: { id: 'heading', level: 1 }, content: [{ type: 'text', text: 'Preparation' }] }, { type: 'paragraph', attrs: { id: 'paragraph' }, content: [{ type: 'text', text: 'Safe evidence', marks: [{ type: 'bold' }, { type: 'underline' }, { type: 'link', attrs: { href: 'https://example.com/evidence' } }] }] }, { type: 'taskList', content: [{ type: 'taskItem', attrs: { id: 'task', checked: false }, content: [{ type: 'paragraph', attrs: { id: 'task-text' }, content: [{ type: 'text', text: 'Review the brief' }] }, { type: 'bulletList', content: [{ type: 'listItem', attrs: { id: 'nested-item' }, content: [{ type: 'paragraph', attrs: { id: 'nested-paragraph' }, content: [{ type: 'text', text: 'Nested source' }] }] }] }] }] }] }
 describe('real Tiptap document integration', () => {
+  it('places formatting above the title and writing canvas', async () => {
+    render(<RichNoteEditor document={document} disabled={false} onChange={() => undefined} beforeContent={<input aria-label="Note title" defaultValue="Launch checklist" />} />)
+    const toolbar = screen.getByRole('toolbar', { name: 'Note formatting' }), title = screen.getByRole('textbox', { name: 'Note title' }), body = await screen.findByRole('textbox', { name: 'Note body' })
+    expect(toolbar.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(title.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
   it('renders supported formatting and emits a server-valid checklist update with stable block identities', async () => {
     const change = vi.fn(), view = render(<RichNoteEditor document={document} disabled={false} onChange={change} />)
     expect(await screen.findByRole('heading', { level: 1, name: 'Preparation' })).toBeVisible()

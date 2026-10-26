@@ -1,11 +1,11 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Extension } from '@tiptap/core'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Plugin } from '@tiptap/pm/state'
-import { Bold, Italic, Underline, Link as LinkIcon, List, ListOrdered, ListTodo, Quote, Undo2, Redo2, X } from 'lucide-react'
+import { Bold, Italic, Underline, Link as LinkIcon, List, ListOrdered, CheckSquare, Quote, Undo2, Redo2, X } from 'lucide-react'
 import type { NoteDocument, NoteNode } from '../shared/notes'
 import { safeNoteLink } from '../shared/note-document'
 import { sanitizeNotePaste } from '../services/note-paste'
@@ -36,7 +36,7 @@ function documentValue(value: NoteNode): NoteDocument {
   }
   return walk(value) as NoteDocument
 }
-export default function RichNoteEditor({ document, disabled, onChange }: { document: NoteDocument; disabled: boolean; onChange(document: NoteDocument): void }): JSX.Element {
+export default function RichNoteEditor({ document, disabled, onChange, beforeContent }: { document: NoteDocument; disabled: boolean; onChange(document: NoteDocument): void; beforeContent?: ReactNode }): JSX.Element {
   const change = useRef(onChange); change.current = onChange
   const [linkOpen, setLinkOpen] = useState(false), [href, setHref] = useState(''), [error, setError] = useState('')
   const editor = useEditor({
@@ -53,6 +53,6 @@ export default function RichNoteEditor({ document, disabled, onChange }: { docum
     <select aria-label="Text style" value={state?.heading ?? 'p'} disabled={disabled} onChange={event => { if (event.target.value === 'p') editor?.chain().focus().setParagraph().run(); else editor?.chain().focus().setHeading({ level: event.target.value === 'h1' ? 1 : 2 }).run() }}><option value="p">Text</option><option value="h1">Heading 1</option><option value="h2">Heading 2</option></select><span className="toolbar-divider" />
     <button type="button" aria-label="Bold" title="Bold (Ctrl+B)" aria-pressed={state?.bold ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold size={17} /></button><button type="button" aria-label="Italic" title="Italic (Ctrl+I)" aria-pressed={state?.italic ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic size={17} /></button><button type="button" aria-label="Underline" title="Underline (Ctrl+U)" aria-pressed={state?.underline ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline size={17} /></button>
     <Dialog.Root open={linkOpen} onOpenChange={setLinkOpen}><Dialog.Trigger asChild><button type="button" aria-label="Link" title="Add or edit link" aria-pressed={state?.link ?? false} disabled={disabled} onClick={() => { setHref(editor?.getAttributes('link').href ?? ''); setError('') }}><LinkIcon size={17} /></button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="confirmation-dialog"><div className="panel-heading"><Dialog.Title>Link</Dialog.Title><Dialog.Close asChild><Button variant="ghost" aria-label="Close link"><X size={18} /></Button></Dialog.Close></div><Dialog.Description>Use a complete http, https, or mailto address.</Dialog.Description><form onSubmit={event => { event.preventDefault(); try { const url = safeNoteLink(href.trim()); editor?.chain().focus().extendMarkRange('link').setLink({ href: url }).run(); setLinkOpen(false) } catch (value) { setError((value as Error).message) } }}><label className="note-field">Address<input aria-label="Link address" value={href} maxLength={2048} onChange={event => setHref(event.target.value)} /></label>{error && <p role="alert">{error}</p>}<div className="dialog-actions"><Button type="button" onClick={() => { editor?.chain().focus().extendMarkRange('link').unsetLink().run(); setLinkOpen(false) }}>Remove link</Button><Button type="submit" variant="primary">Apply link</Button></div></form></Dialog.Content></Dialog.Portal></Dialog.Root>
-    <span className="toolbar-divider" /><button type="button" aria-label="Bulleted list" aria-pressed={state?.bullet ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List size={18} /></button><button type="button" aria-label="Numbered list" aria-pressed={state?.ordered ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered size={18} /></button><button type="button" aria-label="Checklist" aria-pressed={state?.task ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleTaskList().run()}><ListTodo size={18} /></button><button type="button" aria-label="Blockquote" aria-pressed={state?.quote ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><Quote size={17} /></button>
-  </div><EditorContent editor={editor} /></div>
+    <span className="toolbar-divider" /><button type="button" aria-label="Bulleted list" aria-pressed={state?.bullet ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List size={18} /></button><button type="button" aria-label="Numbered list" aria-pressed={state?.ordered ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered size={18} /></button><button type="button" aria-label="Checklist" aria-pressed={state?.task ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleTaskList().run()}><CheckSquare size={18} /></button><button type="button" aria-label="Blockquote" aria-pressed={state?.quote ?? false} disabled={disabled} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><Quote size={17} /></button>
+  </div><div className="note-paper">{beforeContent}<EditorContent editor={editor} /></div></div>
 }

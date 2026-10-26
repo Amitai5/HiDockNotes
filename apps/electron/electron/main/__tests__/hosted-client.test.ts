@@ -6,7 +6,7 @@ const state = vi.hoisted(() => {
   class Window {
     options: any
     url = ''
-    webContents = { mainFrame: { url: '' }, getURL: () => this.url, on: vi.fn((name, callback) => events.set(name, callback)), setWindowOpenHandler: vi.fn(), send: vi.fn() }
+    webContents = { session: { clearStorageData: vi.fn<(options: Electron.ClearStorageDataOptions) => Promise<void>>(async () => undefined) }, mainFrame: { url: '' }, getURL: () => this.url, on: vi.fn((name, callback) => events.set(name, callback)), setWindowOpenHandler: vi.fn(), send: vi.fn() }
     loadURL = vi.fn(async (url: string) => {
       if (failures.has(url)) { events.get('did-fail-load')!({}, -102, 'Connection refused', url, true); throw new Error('Connection refused') }
       this.url = url; this.webContents.mainFrame.url = url
@@ -35,6 +35,7 @@ describe('server-only desktop startup', () => {
   it('shows connection setup without a saved server and registers no local-library operation', async () => {
     const window = await start()
     expect(window.url).toMatch(/\/renderer\/server\.html$/)
+    expect(window.webContents.session.clearStorageData).not.toHaveBeenCalled()
     expect(state.handlers.get('server-connection:get')!(event(window))).toEqual({ origin: null, error: undefined })
     expect(state.handlers.has('server-connection:local')).toBe(false)
     expect(serverMenu().some((item: any) => /local/i.test(item.label ?? ''))).toBe(false)
@@ -48,6 +49,9 @@ describe('server-only desktop startup', () => {
     expect(window.url).toBe('https://notes.example.com')
     expect(window.options.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false })
     expect(window.options.webPreferences.preload).toMatch(/preload[\\/]server\.js$/)
+    expect(window.webContents.session.clearStorageData).toHaveBeenCalledWith({ origin: 'https://notes.example.com', storages: ['serviceworkers', 'cachestorage'] })
+    expect(window.webContents.session.clearStorageData.mock.invocationCallOrder[0]).toBeLessThan(window.loadURL.mock.invocationCallOrder[0])
+    expect(window.loadURL).toHaveBeenCalledWith('https://notes.example.com', { extraHeaders: 'Cache-Control: no-cache\nPragma: no-cache' })
     expect(state.recorder).not.toHaveBeenCalled()
   })
   it('returns to connection setup when the server cannot be reached', async () => {
@@ -57,6 +61,14 @@ describe('server-only desktop startup', () => {
     expect(window.loadURL).toHaveBeenLastCalledWith(expect.stringMatching(/\/renderer\/server\.html$/))
     expect(state.handlers.get('server-connection:get')!(event(window)).error).toMatch(/Could not reach/)
     expect(state.recorder).not.toHaveBeenCalled()
+  })
+  it('loads fresh server UI from the menu while preserving authentication and note drafts', async () => {
+    state.read.mockReturnValue({ origin: 'https://notes.example.com' })
+    const window = await start()
+    serverMenu().find((item: any) => item.label === 'Open server library').click()
+    await vi.waitFor(() => expect(window.loadURL).toHaveBeenCalledTimes(2))
+    expect(window.webContents.session.clearStorageData).toHaveBeenCalledTimes(2)
+    for (const [options] of window.webContents.session.clearStorageData.mock.calls) expect(options).toEqual({ origin: 'https://notes.example.com', storages: ['serviceworkers', 'cachestorage'] })
   })
   it('recovers a malformed old connection preference through setup', async () => {
     state.read.mockImplementation(() => { throw new Error('Malformed preference') })

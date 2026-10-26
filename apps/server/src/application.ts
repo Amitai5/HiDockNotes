@@ -157,7 +157,13 @@ export async function createApplication(options: ServerOptions) {
     if (value.method.startsWith('notifications/')) return reply.code(202).send()
     try { const result = value.method === 'initialize' ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: product.name, version: product.version } } : value.method === 'ping' ? {} : value.method === 'tools/list' ? { tools: AGENT_TOOL_CATALOG.map(tool => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false } })) } : value.method === 'tools/call' ? { content: [{ type: 'text', text: JSON.stringify(await agentTools.call(value.params?.name ?? '', value.params?.arguments)) }] } : null; return result === null ? { jsonrpc: '2.0', id: value.id, error: { code: -32601, message: 'Method not found.' } } : { jsonrpc: '2.0', id: value.id, result } } catch (error) { return { jsonrpc: '2.0', id: value.id, error: { code: -32602, message: error instanceof Error ? error.message.slice(0,400) : 'Invalid tool arguments or unavailable data.' } } }
   })
-  if (options.webPath && existsSync(options.webPath)) { await app.register(staticFiles, { root: resolve(options.webPath), cacheControl: false }); app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/') || request.url.includes('.')) return reply.code(404).send({ error: 'Not found.' }); return reply.sendFile('index.html') }) }
+  if (options.webPath && existsSync(options.webPath)) {
+    await app.register(staticFiles, { root: resolve(options.webPath), cacheControl: false, setHeaders: (reply, file) => {
+      // Revalidate the entry point and worker so new releases can replace cached UI.
+      if (['index.html', 'sw.js', 'registerSW.js', 'manifest.webmanifest'].includes(basename(file))) reply.header('Cache-Control', 'no-cache, must-revalidate')
+    } })
+    app.setNotFoundHandler((request, reply) => { if (request.url.startsWith('/api/') || request.url.includes('.')) return reply.code(404).send({ error: 'Not found.' }); return reply.sendFile('index.html') })
+  }
   if (options.processing !== false) { queue.start(); calendar.start(); await search.initialize() }
   const interval = setInterval(() => { if (!maintenance && !backups.busy) void backup().catch(() => emitActivityLog('error', 'Scheduled library backup failed.')) }, 24 * 3600000); interval.unref()
   app.addHook('preClose', async () => { for (const client of clients) client.end(); for (const playing of media.values()) for (const stream of playing) stream.destroy(); chatgpt.close(); await Promise.allSettled([conversations.stop(), queue.stop(), calendar.stop(), search.stop(), backups.stop()]) })

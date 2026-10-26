@@ -1,4 +1,5 @@
 import { appClient } from '../services/app-client'
+import { desktopBridge } from '../services/desktop-recorder'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AudioLines, CalendarDays, Check, ChevronRight, FolderOpen, Info, Mic2, Monitor, Moon, Plug, Search, Sun, UserRound, X } from 'lucide-react'
@@ -65,7 +66,7 @@ export function SettingsPage(): JSX.Element {
     <div hidden={!!query.trim() || tab !== 'agents'} role="tabpanel" id="settings-panel-agents" aria-labelledby="settings-tab-agents"><AgentConnectionsPanel /></div>
     <div hidden={!!query.trim() || tab !== 'about'} role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about">
       <WebUpdatesPanel />
-      <section className="settings-section" id="about" tabIndex={-1}><div className="about-app"><BrandMark size={72} /><div><h2>About {product.name}</h2><div className="version-line"><span>Version {version?.version ?? product.version}</span><span>Website & PWA</span><span>{version?.platform === 'win32' ? 'Windows' : version?.platform === 'darwin' ? 'macOS' : version?.platform ?? ''}</span></div></div></div><details className="settings-details"><summary>Licenses &amp; credits</summary><p>MIT licensed. Jensen protocol and device services adapted from sgeraldes/hidock-next-2 at commit 31d44da. Copyright © 2025 Sebastian Geraldes. Full notices are included with the source and installer.</p></details></section>
+      <section className="settings-section" id="about" tabIndex={-1}><div className="about-app"><BrandMark size={72} /><div><h2>About {product.name}</h2><div className="version-line"><span>Interface {product.version}</span><span>Server {version?.version ?? 'connecting…'}</span><span>{desktopBridge() ? 'Desktop · server library' : 'Website & PWA'}</span><span>{version?.platform === 'win32' ? 'Windows' : version?.platform === 'darwin' ? 'macOS' : version?.platform ?? ''}</span></div></div></div><details className="settings-details"><summary>Licenses &amp; credits</summary><p>MIT licensed. Jensen protocol and device services adapted from sgeraldes/hidock-next-2 at commit 31d44da. Copyright © 2025 Sebastian Geraldes. Full notices are included with the source and installer.</p></details></section>
     </div>
   </div>
 }

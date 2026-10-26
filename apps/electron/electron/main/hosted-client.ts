@@ -49,9 +49,15 @@ async function createWindow(): Promise<void> {
   }
   const settings = async () => { if (recorder?.busy) throw new Error('Finish device sync before changing the server.'); await recorder?.close(); await showSetup() }
   const report = (error: unknown) => dialog.showErrorBox('HiDockNotes connection', error instanceof Error ? error.message : 'Could not change the server connection.')
+  const loadServer = async (): Promise<void> => {
+    if (!origin) return
+    // Remove only cached UI, preserving login cookies and unsent recovery drafts.
+    await window!.webContents.session.clearStorageData({ origin, storages: ['serviceworkers', 'cachestorage'] })
+    await window!.loadURL(origin, { extraHeaders: 'Cache-Control: no-cache\nPragma: no-cache' })
+  }
   const openServer = async () => {
     if (recorder?.busy) throw new Error('Finish device sync before reopening the server.')
-    if (origin) await window!.loadURL(origin).catch(showSetup)
+    if (origin) await loadServer().catch(showSetup)
   }
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
@@ -68,7 +74,7 @@ async function createWindow(): Promise<void> {
       void showSetup().catch(report)
     }
   })
-  await window.loadURL(origin ?? setup).catch(showSetup)
+  await (origin ? loadServer() : window.loadURL(setup)).catch(showSetup)
 }
 app.on('second-instance', () => { if (window?.isMinimized()) window.restore(); window?.show(); window?.focus() })
 if (ownsInstance) app.whenReady().then(createWindow).catch(error => { dialog.showErrorBox('Could not open the server', error instanceof Error ? error.message : 'Check the server address.'); app.exit(1) })
