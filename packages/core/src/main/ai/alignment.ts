@@ -26,7 +26,17 @@ export function speakerForTime(item: TimedText, turns: SpeakerTurn[]): number | 
     const overlap = Math.max(0, Math.min(item.end, turn.end) - Math.max(item.start, turn.start))
     if (overlap > best || item.start === item.end && item.start >= turn.start && item.start <= turn.end) { best = overlap; speaker = turn.speaker }
   }
-  return speaker
+  if (speaker !== null) return speaker
+  // Bridge only a sub-second boundary hole bounded by the same native voice.
+  // Gaps at speaker changes or unmatched passages keep their uncertainty.
+  let before: SpeakerTurn | undefined, after: SpeakerTurn | undefined
+  for (const turn of turns) {
+    if (turn.end <= item.start && (!before || turn.end > before.end)) before = turn
+    if (turn.start >= item.end && (!after || turn.start < after.start)) after = turn
+  }
+  if (!before || !after || before.speaker !== after.speaker || after.start - before.end > 1 || item.start - before.end > 0.35 || after.start - item.end > 0.35) return null
+  const candidate = before.speaker
+  return turns.some(turn => turn.speaker !== candidate && turn.end >= item.start - 0.35 && turn.start <= item.end + 0.35) ? null : candidate
 }
 export function alignTranscript(recordingId: string, items: TimedText[], turns: SpeakerTurn[], names: Map<number, string>, words: boolean): TranscriptSegment[] {
   const output: TranscriptSegment[] = []
@@ -38,7 +48,7 @@ export function alignTranscript(recordingId: string, items: TimedText[], turns: 
     if (words && previous && previous.speakerId === speakerId && item.start - previous.end < 1.5 && item.end - previous.start <= 12 && !/[.!?。！？]$/.test(previous.text)) {
       previous.text += /^[,.;:!?，。]/.test(item.text) ? item.text : ' ' + item.text
       previous.end = Math.max(previous.end, item.end)
-    } else output.push({ id: deterministicId(`${recordingId}:segment:${output.length}`), start: item.start, end: item.end, text: item.text, speakerId, speakerName: speaker === null ? 'Unassigned speaker' : names.get(speaker) ?? `Speaker ${speaker + 1}` })
+    } else output.push({ id: deterministicId(`${recordingId}:segment:${output.length}`), start: item.start, end: item.end, text: item.text, speakerId, speakerName: speaker === null ? 'Unassigned speech' : names.get(speaker) ?? `Speaker ${speaker + 1}` })
   }
   return output
 }

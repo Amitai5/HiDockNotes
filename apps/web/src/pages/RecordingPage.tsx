@@ -19,6 +19,7 @@ import { useRecordingPlayback } from '../hooks/useRecordingPlayback'
 import { ProcessingControls } from '../components/ProcessingControls'
 import { TranscriptTools } from '../components/TranscriptTools'
 import { RecordingCalendar } from '../components/RecordingCalendar'
+import { labelTranscriptSpeakers } from '../services/transcript-speaker-labels'
 
 const ACTIVE_STAGES = ['queued', 'converting', 'diarizing', 'transcribing', 'identifying', 'summarizing']
 export function RecordingPage({ onRecordingChange }: { onRecordingChange?(recording: RecordingView): void } = {}): JSX.Element {
@@ -37,7 +38,8 @@ function RecordingContent({ id, onRecordingChange }: { id: string; onRecordingCh
   const [speaker, setSpeaker] = useState<SpeakerEdit | null>(null)
   const [edit, setEdit] = useState<TranscriptSegment | null>(null)
   const speakerTrigger = useRef<HTMLElement | null>(null)
-  const colors = useMemo(() => speakerColors(detail?.segments.map(segment => segment.speakerName ?? 'Unknown speaker') ?? []), [detail?.segments])
+  const transcriptSegments = useMemo(() => labelTranscriptSpeakers(detail?.segments ?? [], detail?.speakers), [detail?.segments, detail?.speakers])
+  const colors = useMemo(() => speakerColors(transcriptSegments.map(segment => segment.speakerName ?? 'Unassigned speech')), [transcriptSegments])
   const { audio, position, playing, loading, rate, seek, playPause, changeRate, suspend } = useRecordingPlayback(id, !!detail?.recording.hasAudio, Number(query.get('t')) || 0)
   const refresh = useCallback(() => { if (id && !deleting.current) void appClient.library.detail(id).then(value => { if (!deleting.current) setDetail(value) }).catch(error => { if (!deleting.current) reportError(error) }) }, [id])
   useEffect(() => {
@@ -78,7 +80,7 @@ function RecordingContent({ id, onRecordingChange }: { id: string; onRecordingCh
       <div><dt><CalendarDays size={14} />Recorded</dt><dd><time dateTime={detail.recording.recordedAt}>{new Date(detail.recording.recordedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</time><small>{new Date(detail.recording.recordedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} · {formatDuration(duration)}</small></dd></div>
       <div><dt><Folder size={14} />Project</dt><dd><Link className="metadata-project" to={detail.recording.projectId ? `/library?project=${encodeURIComponent(detail.recording.projectId)}` : '/library?scope=unfiled'}>{projects.find(project => project.id === detail.recording.projectId)?.name ?? (detail.recording.projectId ? 'Project folder' : 'Unfiled')}</Link></dd></div>
       <div><dt><FileText size={14} />Meeting type</dt><dd>{detail.meeting?.meetingType ?? <span className="muted">Not summarized yet</span>}</dd></div>
-      <div className="overview-participants"><dt><UsersRound size={14} />Participants</dt><dd><RecordingParticipants detail={detail} onEdit={editSpeaker} /><label className="speaker-count-control">Speakers on retranscribe<select aria-label="Speaker count" disabled={active || detail.deletionPending} value={detail.expectedSpeakers ?? 'auto'} onChange={event => { void appClient.library.setSpeakerCount(id, event.target.value === 'auto' ? null : Number(event.target.value)).then(refresh).catch(reportError) }}><option value="auto">Auto</option>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select></label></dd>{detail.speakerLimitReached && <small className="muted">Review uncertain speaker labels.</small>}</div>
+      <div className="overview-participants"><dt><UsersRound size={14} />Participants</dt><dd><RecordingParticipants detail={detail} onEdit={editSpeaker} /><label className="speaker-count-control">Speakers on retranscribe<select aria-label="Speaker count" disabled={active || detail.deletionPending} value={detail.expectedSpeakers ?? 'auto'} onChange={event => { void appClient.library.setSpeakerCount(id, event.target.value === 'auto' ? null : Number(event.target.value)).then(refresh).catch(reportError) }}><option value="auto">Auto · prefers 1–3</option>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}</option>)}</select></label></dd>{detail.speakerLimitReached && <small className="muted">Review uncertain speaker labels.</small>}</div>
       <div className="overview-tags"><dt><Tags size={14} />Tags</dt><dd><RecordingTags key={id} id={id} tags={detail.tags ?? []} onSaved={refresh} /></dd></div>
     </dl>
     <RecordingCalendar id={id} disabled={detail.deletionPending} />
@@ -97,9 +99,9 @@ function RecordingContent({ id, onRecordingChange }: { id: string; onRecordingCh
       </div>
       <section className="recording-transcript" aria-labelledby="transcript-heading"><h2 id="transcript-heading"><FileText size={18} />Transcript</h2>
       <TranscriptTools recordingId={id} segments={detail.segments} edit={edit} onCloseEdit={() => setEdit(null)} onChanged={refresh} disabled={active || busy} />
-      {detail.segments.length ? detail.segments.map(segment => {
+      {detail.segments.length ? transcriptSegments.map(segment => {
         const voice = detail.speakers?.find(value => value.id === segment.speakerId)
-        const label = segment.speakerName ?? voice?.label ?? 'Unknown speaker'
+        const label = segment.speakerName ?? voice?.label ?? 'Unassigned speech'
         return <div key={segment.id} className={`transcript-segment ${position >= segment.start && position < segment.end ? 'current' : ''}`}><button className="transcript-time" aria-label={`Play from ${formatDuration(segment.start)}`} onClick={() => seek(segment.start)}><time>{formatDuration(segment.start)}</time></button><span>{<button className={`speaker-label ${colors.get(label.trim().toLowerCase()) ?? 'speaker-unknown'}`} aria-label={voice ? `Rename ${label}` : `Assign speaker at ${formatDuration(segment.start)}`} onClick={() => openSpeaker(voice ? { speaker: voice } : { segment })}><strong>{label}</strong><Pencil size={12} /></button>}{voice?.suggestedName && <Button className="speaker-suggestion" variant="ghost" onClick={() => { void appClient.voices.confirmSpeaker(voice.id).then(refresh).catch(reportError) }}>Possibly {voice.suggestedName}? <CheckCircle2 size={12} /></Button>}<button className="transcript-text" onClick={() => seek(segment.start)}>{segment.text}</button><button className="transcript-edit-button" aria-label={`Edit excerpt at ${formatDuration(segment.start)}`} title="Edit transcript excerpt" disabled={active || busy} onClick={() => setEdit(segment)}><Pencil size={13} /></button></span></div>
       }) : <div className="inline-empty">{active ? 'The transcript will appear here as soon as transcription finishes.' : detail.recording.status === 'empty' ? 'This recording contains silence or no usable audio.' : !detail.recording.hasAudio ? 'Download the audio first, then the app can transcribe it.' : 'Set up AI in Settings to turn this recording into a transcript, summary and action items.'}</div>}
     </section>

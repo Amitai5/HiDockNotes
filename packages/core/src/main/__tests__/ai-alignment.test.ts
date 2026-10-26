@@ -22,6 +22,17 @@ describe('local timing and voice recognition', () => {
   it('does not invent a speaker for speech outside diarized turns', () => {
     expect(speakerForTime({ start: 8, end: 9, text: 'Noise?' }, [{ start: 0, end: 1, speaker: 0 }])).toBeNull()
   })
+  it('bridges a short timing hole only when the same native speaker surrounds it', () => {
+    const item = { start: 2.1, end: 2.2, text: 'Yes.' }
+    expect(speakerForTime(item, [{ start: 0, end: 2, speaker: 0 }, { start: 2.3, end: 4, speaker: 0 }])).toBe(0)
+    expect(speakerForTime(item, [{ start: 0, end: 2, speaker: 0 }, { start: 2.3, end: 4, speaker: 1 }])).toBeNull()
+    expect(speakerForTime(item, [{ start: 0, end: 1, speaker: 0 }, { start: 3, end: 4, speaker: 0 }])).toBeNull()
+    expect(speakerForTime(item, [{ start: 0, end: 2, speaker: 0 }, { start: 2.3, end: 4, speaker: 0 }, { start: 1.5, end: 2, speaker: 1 }])).toBeNull()
+  })
+  it('keeps long unmatched passages unassigned rather than guessing the previous voice', () => {
+    const result = alignTranscript('rec', [{ start: 2, end: 8, text: 'Uncertain passage.' }], [{ start: 0, end: 1.9, speaker: 0 }, { start: 8.1, end: 10, speaker: 0 }], new Map([[0, 'Dana']]), false)
+    expect(result[0]).toMatchObject({ speakerId: null, speakerName: 'Unassigned speech', text: 'Uncertain passage.', start: 2, end: 8 })
+  })
   it('compares all profile samples and distinguishes auto, suggestion and unknown', () => {
     const profiles = [{ id: 'dana', name: 'Dana', embeddings: [[0, 1], [1, 0]] }]
     expect(matchVoice([1, 0], profiles, 'Speaker 1', 0.6, 0.75)).toMatchObject({ profileId: 'dana', label: 'Dana' })

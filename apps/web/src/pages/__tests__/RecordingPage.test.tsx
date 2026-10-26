@@ -96,6 +96,26 @@ describe('recording processing results in the Library', () => {
     await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled())
     expect(useAppStore.getState().error).toBeNull()
   })
+  it('shows stable numbers for anonymous IDs and separates genuinely unassigned speech', async () => {
+    detail.recording.status = 'done'
+    detail.speakers = ['first', 'second'].map(id => ({ id, label: 'Unknown speaker', profileId: null, suggestedProfileId: null, suggestedName: null, score: null, canRemember: false }))
+    detail.meeting = { meetingType: 'Planning', participants: [{ speakerId: 'first', name: 'Unknown speaker', organizer: false }] }
+    detail.segments = [
+      { id: 'one', start: 1, end: 2, text: 'First voice.', speakerId: 'first', speakerName: 'Unknown speaker' },
+      { id: 'two', start: 3, end: 4, text: 'Second voice.', speakerId: 'second', speakerName: null },
+      { id: 'three', start: 5, end: 6, text: 'Uncertain turn.', speakerId: null, speakerName: null }
+    ]
+    render(<MemoryRouter initialEntries={['/library/recording']}><Routes><Route path="/library/:id" element={<RecordingPage />} /></Routes></MemoryRouter>)
+    const transcript = await screen.findByRole('region', { name: 'Transcript', exact: true })
+    expect(within(transcript).getByText('Unknown speaker 1')).toBeVisible()
+    expect(within(transcript).getByText('Unknown speaker 2')).toBeVisible()
+    expect(within(transcript).getByText('Unassigned speech')).toBeVisible()
+    const overview = screen.getByLabelText('Recording overview')
+    expect(within(overview).getByText('Unknown speaker 1')).toBeVisible()
+    expect(within(overview).queryByText('Unassigned speech')).not.toBeInTheDocument()
+    expect(screen.queryByText('Unknown speaker', { exact: true })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Auto · prefers 1–3' })).toBeInTheDocument()
+  })
   it('shows meeting type, supported participant names and organizer in the overview', async () => {
     detail.recording.status = 'done'
     detail.meeting = { meetingType: 'Project review', participants: [{ speakerId: null, name: 'Dana Lee', organizer: true }, { speakerId: null, name: 'Unknown speaker 2', organizer: false }] }

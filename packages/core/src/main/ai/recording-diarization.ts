@@ -3,22 +3,24 @@ import type { DiarizationModels } from './model-cache'
 import { boundDiarizedAudio, type DiarizationCheckpoints, type DiarizedAudio } from './local-diarization'
 import { normalizeEmbedding } from './voice-matching'
 import { ProcessingError } from './errors'
+import { AUTOMATIC_CLUSTER_THRESHOLD, preferFewerSpeakers } from './speaker-preference'
 
-/** Brief noise clusters and voices without a clean sample remain unassigned, not new participants. */
+/** Reject brief/mixed noise; keep supported anonymous turns even without an enrollable voice sample. */
 export function retainSupportedSpeakers(audio: DiarizedAudio, expectedSpeakers?: number): DiarizedAudio {
   if (expectedSpeakers !== undefined) return boundDiarizedAudio(audio)
-  const minimum = Math.max(3, audio.duration * 0.005)
+  // A genuine brief attendee must not disappear just because the meeting is long.
+  const minimum = 3
   const weights = new Map(audio.embeddings.map(voice => [voice.speaker, audio.turns.filter(turn => turn.speaker === voice.speaker).reduce((sum, turn) => sum + turn.end - turn.start, 0)]))
-  const supported = audio.embeddings.filter(voice => voice.vector && weights.get(voice.speaker)! >= minimum)
+  const supported = audio.embeddings.filter(voice => weights.get(voice.speaker)! >= minimum)
   const ids = new Set(supported.filter(voice => {
-    if (weights.get(voice.speaker)! >= audio.duration * 0.02) return true
-    const scores = supported.filter(other => other.speaker !== voice.speaker && weights.get(other.speaker)! >= weights.get(voice.speaker)! * 3).map(other => voice.vector!.reduce((sum, value, index) => sum + value * other.vector![index], 0)).sort((a, b) => b - a)
+    if (!voice.vector || weights.get(voice.speaker)! >= audio.duration * 0.02) return true
+    const scores = supported.filter(other => other.vector && other.speaker !== voice.speaker && weights.get(other.speaker)! >= weights.get(voice.speaker)! * 3).map(other => voice.vector!.reduce((sum, value, index) => sum + value * other.vector![index], 0)).sort((a, b) => b - a)
     // A small cluster equally similar to two established voices is often
     // overlapping/mixed audio. Leave its text unassigned instead of inventing
     // another person or enrolling that mixture as a voice sample.
     return !(scores.length >= 2 && scores[1] >= 0.35 && scores[0] - scores[1] < 0.15)
   }).map(voice => voice.speaker))
-  return boundDiarizedAudio({ ...audio, embeddings: audio.embeddings.filter(voice => ids.has(voice.speaker)), turns: audio.turns.filter(turn => ids.has(turn.speaker)) })
+  return boundDiarizedAudio(preferFewerSpeakers({ ...audio, embeddings: audio.embeddings.filter(voice => ids.has(voice.speaker)), turns: audio.turns.filter(turn => ids.has(turn.speaker)) }))
 }
 
 /** Native clustering sees the entire recording, so section boundaries cannot invent new people. */
@@ -39,7 +41,7 @@ export async function diarizeRecording(path: string, models: DiarizationModels, 
     }
     wave.samples.fill(0, position)
   }
-  const diarizer = new sherpa.OfflineSpeakerDiarization({ segmentation: { pyannote: { model: models.segmentation, windowShiftRatio: 0.5 }, numThreads: threads, provider: 'cpu', debug: false }, embedding: { model: models.embedding, numThreads: threads, provider: 'cpu', debug: false }, clustering: { numClusters: options?.expectedSpeakers ?? -1, threshold: 0.7 }, minDurationOn: 0.3, minDurationOff: 0.5 })
+  const diarizer = new sherpa.OfflineSpeakerDiarization({ segmentation: { pyannote: { model: models.segmentation, windowShiftRatio: 0.5 }, numThreads: threads, provider: 'cpu', debug: false }, embedding: { model: models.embedding, numThreads: threads, provider: 'cpu', debug: false }, clustering: { numClusters: options?.expectedSpeakers ?? -1, threshold: AUTOMATIC_CLUSTER_THRESHOLD }, minDurationOn: 0.3, minDurationOff: 0.5 })
   progress(0, 'Clustering voices across the whole recording locally. Long meetings can take several minutes…')
   const native = diarizer.process(wave.samples)
   signal?.throwIfAborted()

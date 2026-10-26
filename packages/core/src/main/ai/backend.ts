@@ -17,6 +17,7 @@ import { ProcessingError } from './errors'
 import { isTranscriptionResult, readProcessingCache, writeProcessingCache } from './processing-cache'
 import { summarizeMeeting } from './meeting-summary'
 import { diarizeRecording } from './recording-diarization'
+import { SPEAKER_ANALYSIS_VERSION } from './speaker-preference'
 import type { ReferenceContextSnapshot } from '../../../src/shared/reference-context'
 import { detectSpeech, filterSpeechTranscript, isSpeechIntervals } from './local-speech'
 
@@ -26,7 +27,7 @@ export interface TranscriptCheckpoint { segments: TranscriptSegment[]; speakers:
 export interface ProcessingResult extends TranscriptCheckpoint { summary: SummaryResult | null; empty: boolean; transcriptChanged?: boolean }
 export interface BackendObserver { stage(stage: RecordingStatus, progress: number, message: string): void; checkpoint(value: TranscriptCheckpoint): void }
 export interface TranscriptionBackend { process(input: ProcessingInput, observer: BackendObserver, signal?: AbortSignal): Promise<ProcessingResult> }
-interface CachedTranscript extends DiarizedAudio { signature: string; items: TimedText[]; words: boolean }
+interface CachedTranscript extends DiarizedAudio { speakerAnalysis: string; signature: string; items: TimedText[]; words: boolean }
 const execute = promisify(execFile)
 function isPreflight(value: unknown): value is AudioPreflightReport {
   if (!value || typeof value !== 'object') return false
@@ -51,7 +52,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
     const folder = join(input.dataPath, 'cache', 'transcription', input.id, signature)
     await mkdir(folder, { recursive: true })
     let transcript = await readProcessingCache(join(folder, 'transcript.json')) as CachedTranscript | null
-    if (!transcript || transcript.signature !== signature || !Array.isArray(transcript.items) || !Array.isArray(transcript.turns) || !Array.isArray(transcript.embeddings)) {
+    if (!transcript || transcript.speakerAnalysis !== SPEAKER_ANALYSIS_VERSION || transcript.signature !== signature || !Array.isArray(transcript.items) || !Array.isArray(transcript.turns) || !Array.isArray(transcript.embeddings)) {
       // Audio and voice analysis are independent of the chosen transcription
       // model. Reuse verified work across retries and model changes.
       const analysisSignature = createHash('sha256').update(JSON.stringify([input.checksum, 'audio-preflight-v1', 'pyannote-3.0-eres2net-v1'])).digest('hex')
@@ -73,7 +74,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
         observer.stage('transcribing', 0, 'Preparing local transcription models…')
         await provider.prepare(settings.transcription.model, message => observer.stage('transcribing', 0, message), signal)
       }
-      const speakerPath = join(analysisFolder, `speakers-v3-${input.expectedSpeakers ?? 'auto'}.json`), savedSpeakers = await readProcessingCache(speakerPath)
+      const speakerPath = join(analysisFolder, `${SPEAKER_ANALYSIS_VERSION}-${input.expectedSpeakers ?? 'auto'}.json`), savedSpeakers = await readProcessingCache(speakerPath)
       let diarized: DiarizedAudio
       if (isDiarizedAudio(savedSpeakers, preflight.durationSeconds)) {
         diarized = boundDiarizedAudio(savedSpeakers)
@@ -82,7 +83,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
         observer.stage('diarizing', 0, 'Preparing local speaker models…')
         const models = await this.models(join(input.dataPath, 'models', 'speaker-v1')).ensure((message, progress) => observer.stage('diarizing', progress * 0.2, message), signal)
         observer.stage('diarizing', 0.2, 'Finding speaker turns locally. Progress is saved after each section…')
-        diarized = boundDiarizedAudio(await this.diarize(wav, models, signal, (fraction, message) => observer.stage('diarizing', 0.2 + fraction * 0.8, message), { expectedSpeakers: input.expectedSpeakers, activityIntervals: speech, read: index => readProcessingCache(join(analysisFolder, `speaker-v3-${index}.json`)), write: (index, audio) => writeProcessingCache(join(analysisFolder, `speaker-v3-${index}.json`), audio) }))
+        diarized = boundDiarizedAudio(await this.diarize(wav, models, signal, (fraction, message) => observer.stage('diarizing', 0.2 + fraction * 0.8, message), { expectedSpeakers: input.expectedSpeakers, activityIntervals: speech, read: index => readProcessingCache(join(analysisFolder, `${SPEAKER_ANALYSIS_VERSION}-${index}.json`)), write: (index, audio) => writeProcessingCache(join(analysisFolder, `${SPEAKER_ANALYSIS_VERSION}-${index}.json`), audio) }))
         signal?.throwIfAborted()
         await writeProcessingCache(speakerPath, diarized)
       }
@@ -113,7 +114,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
         items.push(...filterSpeechTranscript(stitched, speech))
       }
       if (!items.length) throw new ProcessingError('No timestamped speech was returned. Check the audio and selected language, then retry.')
-      transcript = { ...diarized, signature, items, words }
+      transcript = { ...diarized, speakerAnalysis: SPEAKER_ANALYSIS_VERSION, signature, items, words }
       await writeProcessingCache(join(folder, 'transcript.json'), transcript)
     }
     transcript = { ...transcript, ...boundDiarizedAudio(transcript) }

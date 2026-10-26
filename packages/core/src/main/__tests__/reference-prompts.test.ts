@@ -26,7 +26,7 @@ describe('reference context in summary requests', () => {
   it('keeps background in a separate data block and preserves original transcript words and identity', () => {
     const content = summaryContent(segments, { referenceContext })
     expect(content).toContain('REFERENCE CONTEXT (background only; not recording evidence)')
-    expect(content).toContain('RECORDING TRANSCRIPT\n[0.00-2.00] [speaker_id=unidentified] Unknown speaker: Review the CRM plan.')
+    expect(content).toContain('RECORDING TRANSCRIPT\n[0.00-2.00] [speaker_id=unidentified] Unassigned speech: Review the CRM plan.')
     expect(content).toContain('Global background')
     expect(content).toContain('Project preferred spelling')
     expect(content).not.toContain('Dana Lee: Review')

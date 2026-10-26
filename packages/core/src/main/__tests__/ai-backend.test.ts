@@ -69,6 +69,26 @@ describe('local transcription backend', () => {
     expect(mocks.convert).toHaveBeenCalledTimes(1)
     expect([...mocks.files.values()].join('')).not.toContain('AQ.fake-key')
   })
+  it('refreshes legacy speaker analysis while reusing cached audio transcription', async () => {
+    const backend = new LocalTranscriptionBackend(() => client, diarize, models)
+    await backend.process(input, observer)
+    for (const [file, text] of mocks.files) {
+      if (file.endsWith('transcript.json')) { const cached = JSON.parse(text); delete cached.speakerAnalysis; mocks.files.set(file, JSON.stringify(cached)) }
+      if (file.includes('speakers-v4')) mocks.files.delete(file)
+    }
+    await backend.process(input, observer)
+    expect(diarize).toHaveBeenCalledTimes(2)
+    expect(client.transcribe).toHaveBeenCalledOnce()
+  })
+  it('retains numbered native voices without embeddings while leaving unmatched text unassigned', async () => {
+    diarize.mockResolvedValue({ duration: 20, turns: [{ start: 0, end: 5, speaker: 0 }, { start: 10, end: 15, speaker: 1 }], embeddings: [{ speaker: 0, vector: [1, 0] }, { speaker: 1, vector: null }] })
+    vi.mocked(client.transcribe).mockResolvedValue({ text: 'First. Second. Unmatched.', words: [], segments: [{ start: 1, end: 2, text: 'First.' }, { start: 11, end: 12, text: 'Second.' }, { start: 17, end: 18, text: 'Unmatched.' }] })
+    const result = await new LocalTranscriptionBackend(() => client, diarize, models).process({ ...input, summaryReady: false }, observer)
+    expect(result.segments.map(segment => segment.speakerName)).toEqual(['Unknown speaker 1', 'Unknown speaker 2', 'Unassigned speech'])
+    expect(result.segments[1].speakerId).toBe(result.speakers[1].id)
+    expect(result.speakers[1]).toMatchObject({ embedding: null, profileId: null, label: 'Unknown speaker 2' })
+    expect(client.summarize).not.toHaveBeenCalled()
+  })
   it('chunks a long recording and stitches timestamps into the original timebase', async () => {
     diarize.mockResolvedValue({ duration: 400, turns: [{ start: 0, end: 400, speaker: 0 }], embeddings: [{ speaker: 0, vector: [1, 0] }] })
     mocks.preflight.mockResolvedValue({ status: 'speech_present', durationSeconds: 400, activityIntervals: [{ start: 0, end: 400 }] })
