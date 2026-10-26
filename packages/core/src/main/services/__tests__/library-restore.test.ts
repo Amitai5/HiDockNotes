@@ -63,6 +63,23 @@ describe('verified, recoverable library restore', () => {
     const preview=await restore.prepare(archive);expect(preview?.writtenNotes).toBe(0);await restore.schedule(preview!.id);closeDatabase();applyPendingRestore(data);initializeDatabase(join(data,'data/library.db'))
     expect(getDatabase().pragma('user_version',{simple:true})).toBe(DATABASE_SCHEMA_VERSION);expect(queryOne<{count:number}>('SELECT count(*) AS count FROM written_notes')?.count).toBe(0);expect(getDetail(id).recording.title).toBe('Archived meeting')
   })
+  it('upgrades schema 15 backups by shortening only AI titles without reprocessing the restored transcript', async () => {
+    const longTitle = 'HubSpot Intake Workflow and Form Design Review'
+    run("UPDATE recordings SET title=?,title_source='ai' WHERE id=?", [longTitle, id])
+    const manual = upsertRecordingFromDevice({ filename: 'manual.hda', size: 0, duration: 0, dateCreated: new Date(date) }).id
+    run("UPDATE recordings SET title=?,title_source='manual' WHERE id=?", [longTitle, manual])
+    getDatabase().pragma('user_version=15'); await backups.create(archive)
+    const transcript = getDetail(id).segments
+
+    const preview = await restore.prepare(archive); await restore.schedule(preview!.id); closeDatabase()
+    expect(applyPendingRestore(data)).toBe(true); initializeDatabase(join(data, 'data/library.db'))
+
+    expect(getDetail(id).recording.title).toBe('HubSpot Intake Workflow and Form Design')
+    expect(getDetail(manual).recording.title).toBe(longTitle)
+    expect(getDetail(id).segments).toEqual(transcript)
+    expect(queryOne('SELECT count(*) AS count FROM transcription_jobs')).toEqual({ count: 0 })
+    expect(getDatabase().pragma('user_version', { simple: true })).toBe(DATABASE_SCHEMA_VERSION)
+  })
   it('previews all data and restores audio paths, voices, tasks, tags and transcript revisions without changing external originals', async () => {
     run("UPDATE recordings SET title='Current library to preserve'")
     const preview = await restore.prepare(archive)

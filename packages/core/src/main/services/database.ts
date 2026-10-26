@@ -8,6 +8,7 @@ import type { ActionableView, AppSettings, ProjectView, RecordingDetail, Recordi
 import type { LibraryNavigation } from '../../../src/shared/library'
 import type { MeetingOverview } from '../../../src/shared/meeting'
 import { legacyMeetingOutcomes } from '../../../src/shared/meeting-outcomes'
+import { conciseRecordingTitle } from './recording-title'
 
 export interface Recording { id: string; filename: string; file_path: string | null; file_size: number; date_recorded: string; duration_seconds: number | null; checksum: string | null; verified: number; status: RecordingView['status']; title: string | null; project_id: string | null }
 let connection: Database.Database | undefined
@@ -118,7 +119,9 @@ const migrations = [
    ALTER TABLE server_uploads ADD COLUMN project_id TEXT;
    ALTER TABLE server_uploads ADD COLUMN request_id TEXT;
    CREATE UNIQUE INDEX upload_request_identity ON server_uploads(request_id) WHERE request_id IS NOT NULL;
-   ALTER TABLE transcription_jobs ADD COLUMN context_snapshot TEXT;`
+   ALTER TABLE transcription_jobs ADD COLUMN context_snapshot TEXT;`,
+  // Data-only migration; the shared title normalizer runs in this transaction below.
+  `SELECT 1;`
 ]
 
 export const DATABASE_SCHEMA_VERSION = migrations.length
@@ -164,6 +167,15 @@ export function initializeDatabase(filePath: string): void {
         // metadata leaves notes, transcript revisions and semantic caches intact.
         const update = getDatabase().prepare('UPDATE summaries SET outcomes=? WHERE recording_id=?')
         for (const summary of queryAll<{ recording_id: string; text: string }>('SELECT recording_id,text FROM summaries')) update.run(JSON.stringify(legacyMeetingOutcomes(summary.text)), summary.recording_id)
+      }
+      if (index === 15) {
+        // Only explicit AI provenance is safe to change. FTS and semantic
+        // invalidation use the existing title-update triggers.
+        const update = getDatabase().prepare("UPDATE recordings SET title=? WHERE id=? AND title_source='ai' AND title=?")
+        for (const recording of queryAll<{ id: string; title: string }>("SELECT id,title FROM recordings WHERE title_source='ai' AND title IS NOT NULL")) {
+          const title = conciseRecordingTitle(recording.title)
+          if (title && title !== recording.title) update.run(title, recording.id, recording.title)
+        }
       }
       getDatabase().pragma(`user_version = ${index + 1}`)
     })()

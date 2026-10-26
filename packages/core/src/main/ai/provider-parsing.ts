@@ -4,6 +4,7 @@ import { isDateOnly } from '../../../src/shared/actionables'
 import type { TranscriptSegment } from '../../../src/shared/contracts'
 import { groundedName, parseMeetingParticipants, renderSummaryActions } from './summary-metadata'
 import { parseSummaryOutcomes, renderSummaryOutcomes } from './summary-outcomes'
+import { conciseRecordingTitle } from '../services/recording-title'
 
 function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function timed(start: unknown, end: unknown, text: unknown, duration: number): TimedText | null {
@@ -42,12 +43,6 @@ export function parseGeminiTranscript(value: unknown, duration: number): Transcr
   const unique = words.sort((a, b) => a.start - b.start).filter((w, i, all) => i === 0 || w.start !== all[i - 1].start || w.end !== all[i - 1].end || w.text !== all[i - 1].text)
   if (!unique.length) throw new ProcessingError('Gemini returned no word timestamps. Choose Gemini 3.5 Transcribe and retry.')
   return { text: unique.map(w => w.text).join(' '), words: unique, segments: [] }
-}
-function conciseRecordingTitle(value: string): string {
-  const title = value.trim().split(/\s+/u).slice(0, 6).join(' ')
-  if (Array.from(title).length <= 60) return title
-  const prefix = Array.from(title).slice(0, 60).join('')
-  return prefix.replace(/\s+\S*$/u, '') || prefix
 }
 export function parseSummary(text: string, duration: number, evidence?: TranscriptSegment[]): SummaryResult {
   let value: unknown
