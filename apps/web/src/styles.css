@@ -445,9 +445,11 @@ textarea { -webkit-app-region:no-drag; resize:vertical; border:1px solid var(--b
 .chat-message { flex-shrink:0; border-radius:18px; padding:17px 20px; }
 .chat-user { margin-left:auto; max-width:86%; background:var(--accent-soft); border:1px solid var(--border); border-color:transparent; }
 .chat-assistant { padding-left:4px; padding-right:12px; }
-.chat-message>strong { font-size:12px; color:var(--accent); }
-.chat-message>p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; margin-top:9px; font-size:14px; }
-.chat-assistant>.markdown-content { margin-top:10px; user-select:text; }
+.chat-message>strong { font-size:14px; color:var(--accent); }
+.chat-message>p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; margin-top:9px; font-size:18px; }
+.chat-assistant>.markdown-content { margin-top:10px; user-select:text; font-size:18px; }
+.chat-assistant>.markdown-content h1 { font-size:1.6em; }.chat-assistant>.markdown-content h2 { font-size:1.35em; }.chat-assistant>.markdown-content h3 { font-size:1.15em; }
+.chat-assistant>.markdown-content :is(h4,h5,h6),.chat-assistant>.markdown-content table { font-size:1em; }
 .chat-answer-actions { margin-top:9px; display:flex; }
 .chat-copy { min-height:30px; padding:6px 8px; color:var(--muted); font-size:11px; border-radius:7px; }
 .chat-copy:hover:enabled { color:var(--text); }
