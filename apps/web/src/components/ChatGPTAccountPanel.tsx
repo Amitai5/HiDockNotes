@@ -63,7 +63,7 @@ export function ChatGPTAccountPanel({ state, accept }: { state: AIState; accept(
       <div className="dialog-actions"><Button disabled={busy} onClick={() => setRemoving(null)}>Cancel</Button><Button variant="danger" busy={busy} onClick={() => { void removeAccount() }}>Remove account</Button></div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
     <Dialog.Root open={account?.welcomePending ?? false} onOpenChange={open => { if (!open) void perform(() => appClient.ai.chatgpt.acknowledgeWelcome()) }}><Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="confirmation-dialog">
-      <Dialog.Title>You’re using your ChatGPT plan</Dialog.Title><Dialog.Description>HiDockNotes summaries, action items and Assistant answers can now use your ChatGPT plan allowance or credits. Manage this app’s access and limits in ChatGPT settings. Audio transcription uses the separate provider selected in HiDockNotes.</Dialog.Description>
+      <Dialog.Title>You’re using your ChatGPT plan</Dialog.Title><Dialog.Description>HiDockNotes summaries and Assistant answers can now use your ChatGPT plan allowance or credits. Manage this app’s access and limits in ChatGPT settings. Audio transcription uses the separate provider selected in HiDockNotes.</Dialog.Description>
       <div className="dialog-actions"><Button onClick={() => { void appClient.ai.chatgpt.manageUsage().catch(reportError) }}>Manage usage</Button><Button variant="primary" disabled={busy} onClick={() => { void perform(() => appClient.ai.chatgpt.acknowledgeWelcome()) }}>Got it</Button></div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   </div>

@@ -14,7 +14,7 @@ describe('grounded meeting summaries', () => {
   it('requires the requested sections, bounded participant metadata and lower-case tags in every template', () => {
     for (const summaryTemplate of ['meeting', 'call', 'interview', 'dictation', 'custom'] as const) {
       const prompt = summaryInstructions({ ...DEFAULT_AI_SETTINGS, summaryTemplate })
-      for (const section of ['2–4 paragraphs', 'Key discussion points', 'Decisions', 'Action items', 'Open questions', 'Risks / blockers', 'Next steps', 'Unassigned', 'No date', 'Never expand a partial name']) expect(prompt).toContain(section)
+      for (const section of ['2–4 paragraphs', 'Key discussion points', 'Decisions', 'Open questions', 'Risks / blockers', 'Next steps', 'Unassigned', 'Never expand a partial name']) expect(prompt).toContain(section)
     }
     expect(SUMMARY_SCHEMA.properties.participants.maxItems).toBe(10)
     expect(SUMMARY_SCHEMA.required).toContain('outcomes')
@@ -23,7 +23,8 @@ describe('grounded meeting summaries', () => {
   })
   it('extracts an explicitly introduced full name and organizer, and fills unknown speaking attendees', () => {
     expect(parse().participants).toEqual([{ ...base.participants[0] }, { speakerId: 'unknown', name: 'Unknown speaker 2', organizer: false }])
-    expect(parse().summary).toContain('| Send the plan | Dana Lee | No date |')
+    expect(parse().summary).not.toContain('## Action items')
+    expect(parse().actionItems).toEqual([])
     expect(parse().summary).not.toContain('Bad model table')
     expect(parse().summary).toContain('## Open questions')
   })
@@ -45,10 +46,12 @@ describe('grounded meeting summaries', () => {
     expect(() => parse({ tags: ['one', 'ONE', 'two'] })).toThrow('distinct')
     expect(() => parse({ tags: ['one', 'two'] })).toThrow('3–7')
   })
-  it('uses Unassigned and No date instead of accepting an invented action owner and safely renders literal dollar and pipe characters', () => {
-    const result = parse({ actionItems: [{ text: 'Send $& | the plan', owner: 'Imaginary Person', start: 0, dueDate: null }] })
-    expect(result.actionItems[0].owner).toBeNull()
-    expect(result.summary).toContain('| Send $& \\| the plan | Unassigned | No date |')
+  it('ignores task extraction and strips retired task tables from generated notes', () => {
+    const result = parse({ actionItems: [{ text: 'Legacy task', owner: 'Imaginary Person', start: 0, dueDate: null }] })
+    expect(result.actionItems).toEqual([])
+    expect(result.summary).not.toContain('## Action items')
+    expect(result.summary).toContain('## Decisions')
+    expect(result.summary).toContain('## Open questions')
   })
   it('deduplicates attendees that share a confirmed name or speaker ID', () => {
     expect(parse({ participants: [base.participants[0], base.participants[0]] }).participants).toHaveLength(2)

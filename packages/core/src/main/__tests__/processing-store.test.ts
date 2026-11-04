@@ -7,7 +7,7 @@ import { DEFAULT_AI_SETTINGS } from '../../../src/shared/ai'
 describe('saving regenerated meeting notes', () => {
   beforeEach(() => initializeDatabase(':memory:'))
   afterEach(closeDatabase)
-  it('persists meeting metadata and owners, replaces generated tags and preserves user edits and transcript settings', () => {
+  it('persists meeting metadata and leaves archived task data untouched, replaces generated tags and preserves user edits and transcript settings', () => {
     const id = upsertRecordingFromDevice({ filename: 'fixture.hda', size: 100, duration: 10, dateCreated: new Date('2026-10-07T10:00:00Z') }).id
     renameRecording(id, 'Custom title'); setRecordingTags(id, ['personal'])
     const checkpoint = { duration: 10, speakers: [], segments: [{ id: 'segment', start: 1, end: 2, text: 'Actual original words', speakerId: null, speakerName: null }] }
@@ -19,7 +19,8 @@ describe('saving regenerated meeting notes', () => {
     saveProcessingResult(id, { ...savedTranscript(id), transcriptChanged: false, empty: false, summary }, { ...DEFAULT_AI_SETTINGS, language: 'fr', transcription: { provider: 'openai', model: 'whisper-1' } })
     expect(queryOne('SELECT * FROM transcripts WHERE recording_id=?', [id])).toEqual(original)
     expect(getDetail(id)).toMatchObject({ recording: { title: 'Custom title', summary: 'New summary' }, meeting: { meetingType: 'Planning', participants: summary.participants }, tags: ['personal', 'planning', 'operations', 'meeting'] })
-    expect(getDetail(id).actionables[0]).toMatchObject({ id: 'completed', done: true, owner: 'Dana Lee', dueDate: '2026-10-15', createdAt: '2026-10-07T10:00:00Z' })
+    expect(getDetail(id).actionables).toEqual([])
+    expect(queryOne('SELECT id,done,owner,due_date,created_at FROM actionables WHERE id=?', ['completed'])).toEqual({ id: 'completed', done: 1, owner: null, due_date: '2026-10-15', created_at: '2026-10-07T10:00:00Z' })
     setRecordingTags(id, ['personal', 'meeting', 'edited'])
     saveProcessingResult(id, { ...checkpoint, transcriptChanged: false, empty: false, summary: { ...summary, tags: ['planning', 'client', 'call'] } }, DEFAULT_AI_SETTINGS)
     expect(getDetail(id).tags).toEqual(['personal', 'edited', 'planning', 'client', 'call'])

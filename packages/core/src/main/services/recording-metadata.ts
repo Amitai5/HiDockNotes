@@ -1,4 +1,5 @@
 import { queryAll, queryOne, run, runInTransaction } from './database'
+import { discardProjectBriefings } from './project-briefing-store'
 import { validateId } from '../ipc/jensen-validation'
 
 export function setRecordingTags(id: string, value: unknown): void {
@@ -25,5 +26,10 @@ export function assignRecordingProject(id: string, project: string | null): void
     validateId(project)
     if (!queryOne('SELECT id FROM projects WHERE id=?', [project])) throw new Error('The project folder no longer exists.')
   }
-  if (!run('UPDATE recordings SET project_id=? WHERE id=?', [project, id]).changes) throw new Error('Recording was not found.')
+  const previous = queryOne<{ project_id: string | null }>('SELECT project_id FROM recordings WHERE id=?', [id])
+  if (!previous) throw new Error('Recording was not found.')
+  runInTransaction(() => {
+    run('UPDATE recordings SET project_id=? WHERE id=?', [project, id])
+    if (previous.project_id !== project) { discardProjectBriefings(previous.project_id); discardProjectBriefings(project) }
+  })
 }

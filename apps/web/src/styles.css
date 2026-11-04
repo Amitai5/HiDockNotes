@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "./project-briefing.css";
+@import "./assistant-notes.css";
 
 /* Paper and violet: shared by navigation, notes, chat, settings and dialogs. */
 :root { color-scheme: light; --bg:#fff; --sidebar:#f8f7fc; --surface:#f7f5fc; --surface-hover:#f0ecf8; --text:#282335; --muted:#756f84; --border:#e8e4f0; --accent:#7649f5; --accent-hover:#6334d8; --accent-soft:#eee8ff; --wave-muted:#d7cdef; --success:#26764f; --danger:#ba3555; --shadow:0 20px 60px #24113b26; font-family:'Segoe UI Variable Text','Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif; font-size:14px; -webkit-font-smoothing:antialiased; --border-strong:#d8d0e7; --primary:#7649f5; --primary-hover:#6334d8; --on-primary:#fff; --success-soft:#edf8f1; --danger-soft:#fff0f3; --shadow-sm:0 2px 8px #26134508; --overlay:#120c2359; --control-radius:10px; --panel-radius:14px; --dialog-radius:20px; --chrome-height:64px; }

@@ -1,8 +1,8 @@
 import { ProcessingError } from './errors'
 import type { SummaryResult, TimedText, TranscriptionResult } from './providers'
-import { isDateOnly } from '../../../src/shared/actionables'
+import { withoutActionItems } from '../../../src/shared/summary-content'
 import type { TranscriptSegment } from '../../../src/shared/contracts'
-import { groundedName, parseMeetingParticipants, renderSummaryActions } from './summary-metadata'
+import { parseMeetingParticipants } from './summary-metadata'
 import { parseSummaryOutcomes, renderSummaryOutcomes } from './summary-outcomes'
 import { conciseRecordingTitle } from '../services/recording-title'
 
@@ -48,17 +48,10 @@ export function parseSummary(text: string, duration: number, evidence?: Transcri
   let value: unknown
   try { value = JSON.parse(text) } catch { throw new ProcessingError('The summary response was incomplete. Retry to generate the summary again.', true) }
   const item = record(value)
-  if (typeof item.title !== 'string' || !item.title.trim() || typeof item.summary !== 'string' || !item.summary.trim() || !Array.isArray(item.actionItems)) throw new ProcessingError('The summary did not contain a title, summary and action items. Retry to generate it again.', true)
-  if (item.actionItems.length > 200 || item.summary.length > 100000) throw new ProcessingError('The summary response exceeded the supported size.')
-  const actionItems = item.actionItems.map(a => {
-    const action = record(a)
-    if (typeof action.text !== 'string' || !action.text.trim() || action.text.length > 2000 || (action.start !== null && (typeof action.start !== 'number' || !Number.isFinite(action.start) || action.start < 0 || action.start > duration))) throw new ProcessingError('The summary contained an invalid action item or timestamp. Retry to generate it again.', true)
-    if (action.dueDate !== undefined && action.dueDate !== null && !isDateOnly(action.dueDate)) throw new ProcessingError('The summary contained an invalid due date. Retry to generate it again.', true)
-    if (action.owner !== undefined && action.owner !== null && (typeof action.owner !== 'string' || action.owner.length > 160)) throw new ProcessingError('The summary contained an invalid action owner.', true)
-    const owner = typeof action.owner === 'string' && action.owner.trim() && (!evidence || groundedName(action.owner, evidence)) ? action.owner.trim() : null
-    return { text: action.text.trim(), start: action.start as number | null, ...(action.owner === undefined ? {} : { owner }), ...(action.dueDate === undefined ? {} : { dueDate: action.dueDate as string | null }) }
-  })
-  const summary: SummaryResult = { title: conciseRecordingTitle(item.title), summary: item.summary.trim(), actionItems }
+  if (typeof item.title !== 'string' || !item.title.trim() || typeof item.summary !== 'string' || !item.summary.trim()) throw new ProcessingError('The summary did not contain a title and summary. Retry to generate it again.', true)
+  if (item.summary.length > 100000) throw new ProcessingError('The summary response exceeded the supported size.')
+  const summary: SummaryResult = { title: conciseRecordingTitle(item.title), summary: withoutActionItems(item.summary.trim()), actionItems: [] }
+  if (!summary.summary) throw new ProcessingError('The summary contained no meeting notes. Retry to generate it again.', true)
   if (item.outcomes !== undefined) {
     if (!Array.isArray(item.outcomes) || item.outcomes.length > 80) throw new ProcessingError('The summary contained invalid meeting outcomes. Retry to generate it again.', true)
     summary.outcomes = parseSummaryOutcomes(item.outcomes, evidence ?? [])
@@ -70,7 +63,6 @@ export function parseSummary(text: string, duration: number, evidence?: Transcri
     summary.tags = [...new Set(item.tags.map(tag => String(tag).trim().toLowerCase()))]
     if (summary.tags.length < 3) throw new ProcessingError('Use at least three distinct meeting tags.', true)
     summary.participants = parseMeetingParticipants(item.participants, evidence ?? [])
-    renderSummaryActions(summary)
   }
   return summary
 }

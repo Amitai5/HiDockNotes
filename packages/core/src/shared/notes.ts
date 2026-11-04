@@ -1,13 +1,14 @@
+export const NOTE_FORMAT_VERSION = 2 as const
 export type LibraryScope = { kind: 'all' } | { kind: 'unfiled' } | { kind: 'project'; projectId: string }
-export interface NoteMark { type: 'bold' | 'italic' | 'underline' | 'link'; attrs?: { href?: string; target?: string | null; rel?: string | null; class?: null } }
-export interface NoteNode { type: 'doc' | 'paragraph' | 'heading' | 'text' | 'hardBreak' | 'bulletList' | 'orderedList' | 'listItem' | 'taskList' | 'taskItem' | 'blockquote'; attrs?: { id?: string; level?: number; start?: number; checked?: boolean }; text?: string; marks?: NoteMark[]; content?: NoteNode[] }
+export interface NoteMark { type: 'bold' | 'italic' | 'underline' | 'strike' | 'code' | 'link'; attrs?: { href?: string; target?: string | null; rel?: string | null; class?: null } }
+export interface NoteNode { type: 'doc' | 'paragraph' | 'heading' | 'text' | 'hardBreak' | 'bulletList' | 'orderedList' | 'listItem' | 'taskList' | 'taskItem' | 'blockquote' | 'codeBlock' | 'horizontalRule' | 'table' | 'tableRow' | 'tableCell' | 'tableHeader'; attrs?: { id?: string; level?: number; start?: number; checked?: boolean; language?: string | null }; text?: string; marks?: NoteMark[]; content?: NoteNode[] }
 export interface NoteDocument extends NoteNode { type: 'doc'; content: NoteNode[] }
 export interface WrittenNoteView { kind: 'note'; id: string; title: string; projectId: string | null; projectName: string | null; revision: number; createdAt: string; updatedAt: string; preview: string; tags: string[] }
 export interface WrittenNote extends WrittenNoteView { document: NoteDocument; documentSchema: 1; plainText: string }
 export interface NotePage { notes: WrittenNoteView[]; nextCursor: string | null; total: number; consistency: 'live' }
 export interface NoteListOptions { scope?: LibraryScope; query?: string; limit?: number; cursor?: string | null }
 export interface NoteCreate { requestId: string; projectId: string | null; sourceId?: string; title?: string; document?: NoteDocument; tags?: string[] }
-export interface NoteSave { title: string; document: NoteDocument; tags: string[]; expectedRevision: number; mutationId: string }
+export interface NoteSave { formatVersion?: typeof NOTE_FORMAT_VERSION; title: string; document: NoteDocument; tags: string[]; expectedRevision: number; mutationId: string }
 export type NoteMutationResult = { status: 'saved'; note: WrittenNote } | { status: 'conflict'; current: WrittenNote }
 export interface NoteRevision { revision: number; title: string; createdAt: string }
 export interface NoteBlock { id: string; part: number; type: string; heading: string | null; text: string; checked?: boolean; depth: number }

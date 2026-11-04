@@ -85,7 +85,7 @@ describe('mixed library workspace and flat navigation', () => {
     useAppStore.setState({ search: 'Research' }); show(); const link = await screen.findByRole('link', { name: /Prepared brief/ }); expect(link).toHaveAttribute('href', '/notes/written?project=team'); fireEvent.click(link); expect(screen.getByTestId('route')).toHaveTextContent('/notes/written?project=team')
   })
   it('shows the three project actions in order and creates an idempotent note in that project', async () => {
-    const { container } = show('/library?project=team'); await screen.findByRole('heading', { name: 'Team', level: 1 }); const actions = within(container.querySelector('.project-workspace-actions') as HTMLElement).getAllByRole('button'); expect(actions.map(button => button.textContent)).toEqual(['Project context', 'New note from audio', 'New note']); fireEvent.click(actions[2]); await waitFor(() => expect(appClient.notes.create).toHaveBeenCalledWith({ requestId: expect.any(String), projectId: 'team' })); expect(await screen.findByTestId('route')).toHaveTextContent('/notes/new-note?project=team&focusTitle=1')
+    const { container } = show('/library?project=team'); await screen.findByRole('heading', { name: 'Team', level: 1 }); const actions = within(container.querySelector('.project-workspace-actions') as HTMLElement).getAllByRole('button'); expect(actions.map(button => button.textContent)).toEqual(['Project context', 'Catch me up', 'New note from audio', 'New note']); fireEvent.click(actions[3]); await waitFor(() => expect(appClient.notes.create).toHaveBeenCalledWith({ requestId: expect.any(String), projectId: 'team' })); expect(await screen.findByTestId('route')).toHaveTextContent('/notes/new-note?project=team&focusTitle=1')
   })
   it('reuses a creation request after a lost response rather than duplicating the note', async () => {
     vi.mocked(appClient.notes.create).mockRejectedValueOnce(Error('Connection lost')); show('/library?project=team'); fireEvent.click(screen.getAllByRole('button', { name: 'New note' })[0]); await screen.findByRole('alert'); fireEvent.click(screen.getByRole('button', { name: 'Retry new note' })); await screen.findByTestId('route'); expect(vi.mocked(appClient.notes.create).mock.calls[0][0]).toEqual(vi.mocked(appClient.notes.create).mock.calls[1][0])
@@ -101,5 +101,16 @@ describe('mixed library workspace and flat navigation', () => {
   })
   it('keeps project-folder creation in the Projects sidebar control', async () => {
     show(); fireEvent.click(screen.getByRole('button', { name: 'New project folder' })); expect(screen.getByLabelText('Folder name')).toHaveFocus(); fireEvent.change(screen.getByLabelText('Folder name'), { target: { value: ' Research ' } }); fireEvent.click(screen.getByRole('button', { name: 'Create folder' })); await waitFor(() => expect(create).toHaveBeenCalledWith('Research')); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+})
+
+describe('project Catch me up navigation', () => {
+  it('opens the project briefing and keeps recordings reachable in the contents rail', async () => {
+    appClient.projectBriefing = { get: vi.fn(async () => ({ project: { id: 'team', name: 'Team' }, days: 30, since: '2026-10-04T18:00:00Z', until: '2026-11-03T18:00:00Z', briefing: null, sourcesChanged: false, busy: false, canGenerate: false, reason: 'No summarized meetings.', coverage: { recentMeetings: 0, eligibleMeetings: 0, includedMeetings: 0, staleSummaries: 0 } })), generate: vi.fn(), cancel: vi.fn() }
+    showWorkspace('/library?project=team'); fireEvent.click(await screen.findByRole('button', { name: 'Catch me up', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'Catch me up', exact: true })).toBeVisible()
+    expect(screen.getByTestId('route')).toHaveTextContent('/library?project=team&view=briefing')
+    expect(appClient.projectBriefing.generate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('link', { name: /Project call/ })); expect(await screen.findByRole('heading', { name: 'Opened recording call' })).toBeVisible()
   })
 })

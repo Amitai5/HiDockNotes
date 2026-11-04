@@ -4,7 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readAudioDuration } from './audio-duration'
-import type { ActionableView, AppSettings, ProjectView, RecordingDetail, RecordingView } from '../../../src/shared/contracts'
+import type { AppSettings, ProjectView, RecordingDetail, RecordingView } from '../../../src/shared/contracts'
 import type { LibraryNavigation } from '../../../src/shared/library'
 import type { MeetingOverview } from '../../../src/shared/meeting'
 import { legacyMeetingOutcomes } from '../../../src/shared/meeting-outcomes'
@@ -136,7 +136,9 @@ const migrations = [
    ) AND (
      title='Live recording '||strftime('%Y-%m-%dT%H:%M:%fZ',substr(title,16))
      OR title='Interrupted capture '||strftime('%Y-%m-%dT%H:%M:%fZ',substr(title,21))
-   );`
+   );`,
+  // Guard richer note documents from older writers; existing data is not rewritten.
+  `SELECT 1;`
 ]
 
 export const DATABASE_SCHEMA_VERSION = migrations.length
@@ -256,7 +258,7 @@ export function getDetail(id: string): RecordingDetail {
     const manual = new Map(queryAll<{ id: string; label: string }>("SELECT id,label FROM speakers WHERE recording_id=? AND label_source='manual'", [id]).map(speaker => [speaker.id, speaker.label]))
     meeting.participants = meeting.participants.map(person => person.speakerId && manual.has(person.speakerId) ? { ...person, name: manual.get(person.speakerId)! } : person)
   }
-  return { recording, meeting, expectedSpeakers: queryOne<{ expected_speakers: number | null }>('SELECT expected_speakers FROM recording_overviews WHERE recording_id=?', [id])?.expected_speakers ?? null, deletionPending: !!queryOne('SELECT recording_id FROM recording_deletions WHERE recording_id=?', [id]), speakerLimitReached: overview?.speaker_limited === 1, tags: queryAll<{ tag: string }>('SELECT tag FROM recording_tags WHERE recording_id=? ORDER BY rowid', [id]).map(row => row.tag), segments: queryAll('SELECT s.id, s.start, s.end, s.text, s.speaker_id AS speakerId, p.label AS speakerName FROM segments s LEFT JOIN speakers p ON p.id=s.speaker_id WHERE s.recording_id=? ORDER BY s.start', [id]), actionables: listActionables().filter(a => a.recordingId === id),
+  return { recording, meeting, expectedSpeakers: queryOne<{ expected_speakers: number | null }>('SELECT expected_speakers FROM recording_overviews WHERE recording_id=?', [id])?.expected_speakers ?? null, deletionPending: !!queryOne('SELECT recording_id FROM recording_deletions WHERE recording_id=?', [id]), speakerLimitReached: overview?.speaker_limited === 1, tags: queryAll<{ tag: string }>('SELECT tag FROM recording_tags WHERE recording_id=? ORDER BY rowid', [id]).map(row => row.tag), segments: queryAll('SELECT s.id, s.start, s.end, s.text, s.speaker_id AS speakerId, p.label AS speakerName FROM segments s LEFT JOIN speakers p ON p.id=s.speaker_id WHERE s.recording_id=? ORDER BY s.start', [id]), actionables: [],
     processing: queryOne('SELECT stage, progress, message, error, attempt, mode, next_attempt_at AS nextAttemptAt FROM transcription_jobs WHERE recording_id=?', [id]),
     speakers: queryAll<{ id: string; label: string; profileId: string | null; suggestedProfileId: string | null; suggestedName: string | null; score: number | null; canRemember: number }>('SELECT s.id, s.label, s.voice_profile_id AS profileId, s.suggested_profile_id AS suggestedProfileId, p.name AS suggestedName, s.match_score AS score, s.embedding IS NOT NULL AS canRemember FROM speakers s LEFT JOIN voice_profiles p ON p.id=s.suggested_profile_id WHERE s.recording_id=? AND EXISTS(SELECT 1 FROM segments t WHERE t.speaker_id=s.id) ORDER BY s.rowid', [id]).map(s => ({ ...s, canRemember: !!s.canRemember })) }
 }
@@ -277,4 +279,3 @@ export function libraryNavigation(): LibraryNavigation {
   return { projects: listProjects(), looseRecordings, projectRecordings }
 }
 export function createProject(name: string): ProjectView { const id = randomUUID(); run('INSERT INTO projects VALUES (?, ?, ?)', [id, name, new Date().toISOString()]); return { id, name, count: 0 } }
-export function listActionables(): ActionableView[] { return queryAll<Omit<ActionableView, 'done'> & { done: number }>('SELECT id, text, done, recording_id AS recordingId, start, owner, created_at AS createdAt, due_date AS dueDate, completed_at AS completedAt FROM actionables ORDER BY done, due_date IS NULL, due_date, rowid DESC').map(a => ({ ...a, done: a.done === 1 })) }

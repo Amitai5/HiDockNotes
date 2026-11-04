@@ -1,3 +1,4 @@
+import { discardProjectBriefings } from './project-briefing-store'
 import { lstat, readdir, rm, unlink } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import type { RecordingDeletionInfo } from '../../../src/shared/recording-deletion'
@@ -85,6 +86,7 @@ export class RecordingDeletionService {
           run('DELETE FROM synced_files WHERE original_filename=?', [row.filename])
           run('DELETE FROM device_file_cache WHERE filename=?', [row.filename])
           run('DELETE FROM download_queue WHERE filename=?', [row.filename])
+          discardProjectBriefings(queryOne<{ project_id: string | null }>('SELECT project_id FROM recordings WHERE id=?', [id])?.project_id ?? null)
           run('DELETE FROM recordings WHERE id=?', [id])
         })
         this.dependencies.dismissDownload(row.filename)

@@ -19,7 +19,7 @@ describe('recording processing results in the Library', () => {
     setAppClient({ library: { detail: vi.fn(async () => structuredClone(detail)), onChanged: vi.fn(callback => { changed = callback; return vi.fn() }) }, projects: { list: vi.fn(async () => []) }, ai: { getState: vi.fn(async () => ({ settings: DEFAULT_AI_SETTINGS, providers: [{ provider: 'gemini', models: DEFAULT_MODELS.gemini }], ready: true, reason: null, summaryReady: true })), reprocess: vi.fn(async () => undefined) }, devicePipeline: { onState: vi.fn(() => vi.fn()) } } as unknown as AppClient)
   })
   afterEach(cleanup)
-  it('shows newly generated transcript, summary and action items without reopening the page', async () => {
+  it('shows refreshed transcript and summary while omitting legacy task controls', async () => {
     render(<MemoryRouter initialEntries={['/library/recording']}><Routes><Route path="/library/:id" element={<RecordingPage />} /></Routes></MemoryRouter>)
     await screen.findByText('Waiting to process…')
     detail.recording.status = 'done'; detail.recording.summary = 'Dana will send the plan.'
@@ -28,7 +28,8 @@ describe('recording processing results in the Library', () => {
     await act(async () => changed())
     await screen.findByText('I will send the plan.')
     expect(screen.getByText('Dana will send the plan.')).toBeInTheDocument()
-    expect(screen.getByText('Send the plan')).toBeInTheDocument()
+    expect(screen.queryByText('Send the plan')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Action items' })).toBeNull()
     expect(screen.getByRole('heading', { name: 'Summary' }).compareDocumentPosition(screen.getByRole('heading', { name: 'Transcript' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
   it('shows a failed summary reason while preserving the transcript and offering retry', async () => {
@@ -140,7 +141,7 @@ describe('recording processing results in the Library', () => {
     await waitFor(() => expect(appClient.ai.reprocess).toHaveBeenCalledWith('recording', 'summarize'))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     fireEvent.click(trigger); fireEvent.click(screen.getByRole('menuitem', { name: 'Retranscribe' }))
-    expect(screen.getByText(/A new summary, participants, tags and action items follow automatically after you apply it/)).toBeVisible()
+    expect(screen.getByText(/A new summary, participants and tags follow automatically after you apply it/)).toBeVisible()
     appClient.library.setSpeakerCount = vi.fn(async () => undefined)
     expect(screen.getByRole('button', { name: 'Retranscribe and summarize' })).toBeDisabled()
     fireEvent.change(screen.getByLabelText('Speakers for retranscription'), { target: { value: '3' } })

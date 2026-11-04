@@ -2,9 +2,9 @@
 
 # HiDockNotes
 
-Write project notes and turn HiDock recordings or imported audio into searchable transcripts, meeting notes, and action items.
+Write project notes and turn HiDock recordings or imported audio into searchable transcripts and meeting notes.
 
-HiDockNotes is a private recording library you can host on your own server. Open it as a website or install the same interface as a PWA. Sync a HiDock directly from desktop Chrome or Edge, upload existing audio, and access your transcripts, meeting notes, tasks and Assistant from any device. Audio storage, CPU transcription and optional semantic search run on the server. ChatGPT plan and API connections can generate summaries and source-linked answers.
+HiDockNotes is a private recording library you can host on your own server. Open it as a website or install the same interface as a PWA. Sync a HiDock directly from desktop Chrome or Edge, upload existing audio, and access your transcripts, meeting notes and Assistant from any device. Audio storage, CPU transcription and optional semantic search run on the server. ChatGPT plan and API connections can generate summaries and source-linked answers.
 
 The desktop application is a server-only client with native USB transport on your computer. Recordings, transcripts, settings, AI accounts, models and processing live on the Docker server. A running server is required; the desktop has no local-library fallback. The website/PWA needs no Electron runtime or native helper. Physical browser/PWA USB validation remains pending.
 
@@ -19,14 +19,14 @@ The desktop application is a server-only client with native USB transport on you
 | Server transcription | Transcribe with Whisper on your server CPU, with timestamps and speaker labels. Choose Base for speed or Small for higher accuracy. |
 | Meeting notes | Generate a title, meeting type, participants, tags, discussion summary, decisions, open questions, risks, and next steps. |
 | Remembered voices | Name speakers, save clean voice samples locally, and manage people and samples from a compact list and detail panel. |
-| Actionables | Track tasks with owners, due dates, completion history, and links back to their source moments. |
 | Assistant | Ask questions across your library or within one project. Copy answers and review cited transcripts, notes, and audio in a right-hand panel while keeping the chat open. |
+| Project catch-up | Generate an on-demand project briefing with recent decisions, changes across meetings, open questions, cited source passages. |
 | Saved conversations | Create, rename, search, and reopen Assistant chats with their project scope and source citations. Complete backups include them. |
 | Search by meaning | Optionally download a small local model to combine semantic matches with keyword search in Library and Assistant. |
 | Calendar-linked meetings | Connect a Google Calendar private iCal feed and link matching events, agendas, and invitees to recordings. |
 | Transcript corrections | Edit text, restore earlier versions, and compare a new transcription before replacing corrected work. |
 | Export and recovery | Export notes, subtitles, and playable audio; back up and restore the complete library. |
-| MCP access | Let an MCP-compatible agent search recordings by meaning and read notes, meeting outcomes, tasks, and saved reference context through the server’s authenticated, read-only HTTPS endpoint. |
+| MCP access | Let an MCP-compatible agent search recordings by meaning and read notes, meeting outcomes, and saved reference context through the server’s authenticated, read-only HTTPS endpoint. |
 
 ## Install on TrueNAS or another Docker server
 
@@ -94,7 +94,7 @@ Cloud transcription is optional: choose Gemini or OpenAI under **Transcription**
 - Rename a recording from its title and manage tags from its overview. Manual titles and tags are preserved when generating new notes.
 - Use the top search bar to search saved titles, transcripts, and summaries across folders. With local meaning search enabled, choose **Meaning + keywords** to find related passages even when your wording differs. Results show a matching passage and link to its timestamp.
 
-### Read meeting notes and manage tasks
+### Read meeting notes
 
 The recording overview shows its title, date, project, meeting type, participants, and tags. Generated notes start with a purpose-and-outcome summary, followed by key discussion points, decisions, open questions, risks/blockers, and next steps.
 
@@ -102,7 +102,7 @@ New summaries also save structured meeting outcomes: decisions, unresolved quest
 
 Names and organizer status require evidence in the transcript or speaker labels. Unidentified people use **Unknown speaker N**. Generated tags cover the topics, project/client when mentioned, and meeting type. AI output can be wrong; use the linked transcript and audio to check important details.
 
-Action items appear in **Actionables** and the recording's task list, with owners and dates only when stated. Edit task text or deadlines, mark tasks complete, and return to the source moment. Completed tasks remain available in **Completed**. The summary display omits the duplicate action-item table; Markdown and plain-text exports retain it.
+Actionables task tracking has been removed. Agreed follow-ups remain ordinary **Next steps** in meeting notes. Existing task records remain in complete backups for compatibility; they are not displayed, regenerated or exposed to agents. Legacy `/actionables` bookmarks open Library. Summary exports omit old generated task tables.
 
 ### Correct text and speakers
 
@@ -112,16 +112,24 @@ Click a speaker name to select a remembered person or enter a name. Unknown name
 
 When you know the number of people who spoke, choose a count from 1–10 under **Speakers on retranscribe** before retranscribing. The count helps separate voices; it does not establish their identities.
 
+### Keep Assistant answers
+
+Choose **Save as note** beside an Assistant answer to create an editable note in a project or Unfiled items. **Append to note** finds an existing note and adds the answer after its saved content. Headings, lists, emphasis, tables and code remain editable; numbered citations link to recording timestamps or the cited written-note revision/block. A Sources section keeps the original quoted excerpts. Appends preserve the destination title, tags and text, check its revision and offer a review if another window changed it. Saving makes no new AI request and keeps the chat open. See [Assistant answers as notes](docs/assistant-notes.md).
+
 ### Regenerate one recording
 
 Open its recording menu and choose:
 
 | Action | Result |
 | --- | --- |
-| **Resummarize** | Generate notes, participants, tags, and tasks from the saved transcript using your current summary settings and reference context. Audio is not transcribed again. |
+| **Resummarize** | Generate notes, participants and tags from the saved transcript using your current summary settings and reference context. Audio is not transcribed again. |
 | **Retranscribe** | Process the saved audio with your current transcription settings, then generate new notes. If you edited the transcript, compare the result before applying it. |
 
-Existing notes remain available during processing. Manual titles, manual tags, and matching completed tasks are preserved. See the [transcript correction guide](docs/backup-transcripts-updates.md#correct-a-transcript) for comparison and recovery behavior.
+Existing notes remain available during processing. Manual titles and manual tags are preserved. Archived legacy task records remain untouched. See the [transcript correction guide](docs/backup-transcripts-updates.md#correct-a-transcript) for comparison and recovery behavior.
+
+### Catch up on a project
+
+Open a project and choose **Catch me up**. Select the last 7, 30 or 90 days, then **Generate briefing** to review recent decisions, developments across meetings and unresolved questions. Source buttons open the supporting summary or transcript passage and link back to its recording. The last successful briefing is saved on the Docker server; opening or changing this view never requests AI automatically. See [project briefing coverage, privacy and recovery](docs/project-briefings.md).
 
 ### Ask the Assistant
 
@@ -152,7 +160,7 @@ Choose **Export** from the recording menu.
 
 | Format | Contents |
 | --- | --- |
-| Markdown (`.md`) or plain text (`.txt`) | Summary and action items, with an optional timestamped, speaker-labelled transcript. |
+| Markdown (`.md`) or plain text (`.txt`) | Summary and narrative next steps, with an optional timestamped, speaker-labelled transcript. |
 | SRT (`.srt`) or WebVTT (`.vtt`) | Timestamped transcript subtitles. |
 | Optional WAV audio | A verified playable audio copy alongside the exported notes in a new folder. |
 
@@ -162,7 +170,7 @@ Exports leave the original recording in your library. DOCX export is not current
 
 Open **Settings → Device & storage → Library backup**.
 
-- **Create backup** saves a complete `.tar.gz` archive: original local audio, transcripts and revisions, summaries, projects, tags, action items and completion history, voice profiles and samples, saved chats/messages/citations, linked calendar metadata, settings, and recovery metadata. Audio in custom storage folders is included.
+- **Create backup** saves a complete `.tar.gz` archive: original local audio, transcripts and revisions, summaries, projects, tags, archived legacy task data and completion history, voice profiles and samples, saved chats/messages/citations, linked calendar metadata, settings, and recovery metadata. Audio in custom storage folders is included.
 - **Choose backup** verifies an archive and previews its contents before restoring. Restore replaces the current library; it does not merge libraries. You must save a complete safety backup of the current library before the replacement proceeds.
 
 Download device-only recordings first if you want their audio included. Rebuildable models and caches are excluded. Backups contain private audio, text, and voice data and are **not encrypted archives**. Saved credentials stay encrypted; reconnect accounts after restoring on the server.
@@ -189,22 +197,21 @@ Server metadata lives in `/data/data/library.db`; audio lives under the persiste
 
 Choose **Delete recording** from its menu and confirm. The server removes the recording and its associated data immediately. Cleanup of the original HiDock copy is queued for the next authorized browser connection to the same recorder, after verifying its checksum. Imported files are removed from the server.
 
-Deletion removes that recording's audio, transcript, summary, action items, tags, caches, and contributed voice samples. Shared projects and other recordings' voice data remain. Deletion cannot be undone; create a backup first if you may need the recording again.
+Deletion removes that recording's audio, transcript, summary, archived legacy task records, tags, caches, and contributed voice samples. Shared projects and other recordings' voice data remain. Deletion cannot be undone; create a backup first if you may need the recording again.
 
 ## Connect an MCP client
 
 1. Open **Settings → Agent connections** on your hosted website.
 2. Enable **MCP access**. It is off by default.
 3. Choose **Copy configuration** and add the generated JSON server entry to your client's MCP settings. The configuration contains the server HTTPS URL and a read-only bearer token.
-4. Ask the agent to find recordings, read notes, or list action items. Disable MCP access to revoke reads.
+4. Ask the agent to find recordings, read notes, or find meeting outcomes. Disable MCP access to revoke reads.
 
 | Tool | Use |
 | --- | --- |
 | `list_projects` | Project folders and recording counts. |
 | `list_recordings` | Recordings, with project/status filters and pagination. |
 | `search_recordings` | Keyword search by default; `mode: "meaning"` combines the optional local model with keyword search. Returns matching passages and available timestamps. |
-| `get_recording` | Summary, timestamped transcript, and action items. |
-| `list_action_items` | Open or completed tasks with deadlines and source timestamps. |
+| `get_recording` | Summary and timestamped transcript. |
 | `get_reference_context` | Global background and, optionally, one project's people, terminology, and background. Reference information is distinct from meeting evidence. |
 | `list_meeting_outcomes` | Decisions, open questions, risks/blockers, and next steps, filtered by project, recording, outcome kind, or recording date. |
 

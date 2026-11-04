@@ -1,3 +1,4 @@
+import { withoutActionItems } from '../../../src/shared/summary-content'
 import type { WrittenNotes } from '../services/written-notes'
 import type { LibraryScope, NoteSearchOptions, NoteSearchPage } from '../../../src/shared/notes'
 import { validateId } from '../ipc/jensen-validation'
@@ -13,9 +14,7 @@ export interface AgentDatabaseReader {
 }
 interface Page { limit: number; offset: number }
 interface RecordingRow { id: string; filename: string; title: string | null; recordedAt: string; durationSeconds: number | null; status: string; projectId: string | null }
-interface ActionRow { id: string; text: string; done: number; recordingId: string; start: number | null; createdAt: string | null; dueDate: string | null; completedAt: string | null }
 const recordingColumns = 'r.id, r.filename, r.title, r.date_recorded AS recordedAt, r.duration_seconds AS durationSeconds, r.status, r.project_id AS projectId'
-const actionColumns = 'a.id, a.text, a.done, a.recording_id AS recordingId, a.start, a.created_at AS createdAt, a.due_date AS dueDate, a.completed_at AS completedAt'
 const statuses = ['device-only', 'downloaded', 'queued', 'converting', 'diarizing', 'transcribing', 'identifying', 'summarizing', 'done', 'failed', 'empty']
 interface AgentServices { notes?: WrittenNotes; noteMeaningSearch?(options:NoteSearchOptions,signal?:AbortSignal):Promise<NoteSearchPage>; meaningSearch?: AgentMeaningSearch; referenceContext?(projectId: string | null): ReferenceContextDocument }
 
@@ -30,8 +29,6 @@ function projectClause(input: Record<string, unknown>, parameters: unknown[]): s
   if (input.projectId === null) return ' AND r.project_id IS NULL'
   parameters.push(validateId(input.projectId)); return ' AND r.project_id=?'
 }
-function boundedText(value: string, limit: number): string { return value.slice(0, limit) }
-function actionable(row: ActionRow): Omit<ActionRow, 'done'> & { done: boolean } { return { ...row, text: boundedText(row.text, 2000), done: row.done === 1 } }
 
 export class LibraryAgentTools {
   constructor(private readonly database: AgentDatabaseReader, private readonly services: AgentServices = {}) {}
@@ -52,7 +49,6 @@ export class LibraryAgentTools {
       case 'get_reference_context': return this.referenceContext(input)
       case 'list_meeting_outcomes': return this.outcomes(input)
       case 'get_recording': return this.recording(input)
-      case 'list_action_items': return this.actions(input)
     }
   }
   private noteScope(input:Record<string,unknown>):LibraryScope { return input.projectId===undefined?{kind:'all'}:input.projectId===null?{kind:'unfiled'}:{kind:'project',projectId:validateId(input.projectId)} }
@@ -123,19 +119,12 @@ export class LibraryAgentTools {
     const offset = integer(input.segmentOffset, 0, 0, 1000000)
     const limit = integer(input.segmentLimit, 50, 1, 100)
     const summaryOffset = integer(input.summaryOffset, 0, 0, 1000000)
-    const recording = this.database.one<RecordingRow & { summary: string | null; summaryLength: number | null }>(`SELECT ${recordingColumns}, substr(s.text,?,24000) AS summary, length(s.text) AS summaryLength FROM recordings r LEFT JOIN summaries s ON s.recording_id=r.id WHERE r.id=?`, [summaryOffset + 1, id])
+    const recording = this.database.one<RecordingRow & { summary: string | null }>(`SELECT ${recordingColumns}, s.text AS summary FROM recordings r LEFT JOIN summaries s ON s.recording_id=r.id WHERE r.id=?`, [id])
     if (!recording) throw new Error('Recording was not found.')
     const segments = this.database.all<{ start: number; end: number; text: string; speaker: string | null }>('SELECT s.start, s.end, s.text, p.label AS speaker FROM segments s LEFT JOIN speakers p ON p.id=s.speaker_id WHERE s.recording_id=? ORDER BY s.start, s.rowid LIMIT ? OFFSET ?', [id, limit + 1, offset])
-    const actions = this.database.all<ActionRow>(`SELECT ${actionColumns} FROM actionables a WHERE a.recording_id=? ORDER BY a.done, a.due_date IS NULL, a.due_date, a.rowid LIMIT 101`, [id])
-    const { summaryLength, ...view } = recording
-    return { recording: view, nextSummaryOffset: (summaryLength ?? 0) > summaryOffset + 24000 ? summaryOffset + 24000 : null, segments: segments.slice(0, limit), nextSegmentOffset: segments.length > limit ? offset + limit : null, actionItems: actions.slice(0, 100).map(actionable), actionItemsTruncated: actions.length > 100 }
+    const summary = recording.summary ? withoutActionItems(recording.summary) : null, summaryLength = summary?.length ?? 0
+    const view = { ...recording, summary: summary?.slice(summaryOffset, summaryOffset + 24000) ?? null }
+    return { recording: view, nextSummaryOffset: summaryLength > summaryOffset + 24000 ? summaryOffset + 24000 : null, segments: segments.slice(0, limit), nextSegmentOffset: segments.length > limit ? offset + limit : null }
   }
-  private actions(input: Record<string, unknown>): unknown {
-    const { limit, offset } = page(input)
-    if (input.done !== undefined && typeof input.done !== 'boolean') throw new Error('done must be a boolean.')
-    const parameters: unknown[] = [input.done === true ? 1 : 0]
-    const where = ' WHERE a.done=?' + projectClause(input, parameters)
-    const rows = this.database.all<ActionRow>(`SELECT ${actionColumns} FROM actionables a JOIN recordings r ON r.id=a.recording_id${where} ORDER BY a.due_date IS NULL, a.due_date, a.rowid DESC LIMIT ? OFFSET ?`, [...parameters, limit + 1, offset])
-    return { actionItems: rows.slice(0, limit).map(actionable), nextOffset: rows.length > limit ? offset + limit : null }
-  }
+
 }

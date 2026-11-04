@@ -43,7 +43,7 @@ describe('local transcription backend', () => {
     const result = await backend.process({ ...input, settings: { ...input.settings, chat: { provider: 'openai', model: 'gpt-5.4-mini' } }, keys: { ...input.keys, openai: 'sk-fake' }, profiles: [{ id: 'dana', name: 'Dana', embeddings: [[1, 0]] }] }, observer)
     expect(providers.mock.calls.map(call => call[0])).toEqual(['gemini', 'openai'])
     expect(result.segments[0]).toMatchObject({ text: 'Send it.', speakerName: 'Dana', start: 2, end: 4 })
-    expect(result.summary?.actionItems).toHaveLength(1)
+    expect(result.summary?.actionItems).toHaveLength(0)
     expect(observer.checkpoint).toHaveBeenCalledOnce()
   })
   it('blocks cloud uploads when the local copy no longer matches its verification checksum', async () => {

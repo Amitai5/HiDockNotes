@@ -32,7 +32,6 @@ import { registerSemanticHandlers } from '@hidock/core/ipc/semantic-handlers'
 import { registerReferenceContextHandlers } from '@hidock/core/ipc/reference-context-handlers'
 import { setRecordingTags, assignRecordingProject } from '@hidock/core/services/recording-metadata'
 import { readReferenceContext } from '@hidock/core/services/reference-context'
-import { updateActionable } from '@hidock/core/services/actionables'
 import { preparePlayback, readWaveform, waitForPlayback } from '@hidock/core/services/audio-playback'
 import { RecordingDeletionService } from '@hidock/core/services/recording-deletion'
 import { LibraryBackupService } from '@hidock/core/services/library-backup'
@@ -50,6 +49,8 @@ import { registerUploads } from './uploads'
 import { validateLibraryScope, WrittenNotes } from '@hidock/core/services/written-notes'
 import { libraryContent } from '@hidock/core/services/library-content'
 import { registerNoteHandlers } from '@hidock/core/ipc/note-handlers'
+import { ProjectBriefings } from '@hidock/core/ai/project-briefing'
+import { registerProjectBriefingHandlers } from '@hidock/core/ipc/project-briefing-handlers'
 import product from '../product.json'
 
 export interface ServerOptions { dataPath: string; backupPath: string; origin: string; additionalOrigins?: readonly string[]; webPath?: string; secretPath?: string; logger?: boolean; processing?: boolean; onRestore?: () => void; setupLog?: (message: string) => void; chatgpt?: { request?: typeof fetch; callbackPort?: number } }
@@ -92,8 +93,10 @@ export async function createApplication(options: ServerOptions) {
   const calendar = new CalendarService({ encryption: cipher, parse: parseCalendarInWorker, changed: () => publish('calendar:changed'), libraryChanged: changed })
   const providers = providerFactory(() => chatgpt.accessToken(), message => { const id = store.activeId(); if (id) chatgpt.block(id, message) }, () => chatgpt.sessionSignal(store.activeId()))
   const conversations = registerAIHandlers(queue, vault, providers, changed, chatgpt, openBrowser, search, id => publish('conversations:changed', id), notes)
+  const briefings = new ProjectBriefings({ vault, providers, state: () => queue.state(), changed: () => publish('library:changed') })
+  registerProjectBriefingHandlers(briefings)
   registerTranscriptHandlers(queue, changed); registerCalendarHandlers(calendar, async () => undefined); registerSemanticHandlers(search); registerReferenceContextHandlers(changed)
-  handle('app:info', () => ({ name: product.name, version: product.version, runtime: process.version, platform: 'web' }))
+  handle('app:info', () => ({ name: product.name, version: product.version, runtime: process.version, platform: 'web', origin: options.origin }))
   handle('settings:get', () => db.getSettings(join(dataPath, 'recordings')))
   handle('settings:update', patch => { if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid settings.'); const value = patch as Record<string, unknown>; for (const [key, item] of Object.entries(value)) { if (key === 'name') validateText(item, 80); else if (key === 'autoConnect' || key === 'autoDownload' || key === 'autoDeleteFromDevice') validateBoolean(item); else if (key === 'appearance') { if (!['light','dark','system'].includes(String(item))) throw new Error('Choose a valid appearance.') } else throw new Error('Unknown setting.') }; db.saveSettings(value); const settings = db.getSettings(join(dataPath, 'recordings')); publish('settings:changed', settings); return settings })
   handle('library:list', (search = '', status = '') => db.listRecordings(validateText(search, 500), validateText(status, 40)))
@@ -105,7 +108,6 @@ export async function createApplication(options: ServerOptions) {
   handle('library:speaker-count', (id, count) => { const key = validateId(id); if (count !== null && (!Number.isInteger(count) || Number(count) < 1 || Number(count) > 10)) throw new Error('Choose 1–10 speakers.'); if (!db.queryOne('SELECT id FROM recordings WHERE id=?', [key])) throw new Error('Recording not found.'); db.run('INSERT INTO recording_overviews(recording_id,expected_speakers) VALUES (?,?) ON CONFLICT(recording_id) DO UPDATE SET expected_speakers=excluded.expected_speakers', [key, count]); changed() })
   handle('projects:list', db.listProjects); handle('projects:create', name => { const text = validateText(name, 80); if (!text) throw new Error('Name your folder.'); const project = db.createProject(text); changed(); return project })
   handle('projects:assign', (id, project) => { assignRecordingProject(validateId(id), project === null ? null : validateId(project)); changed() })
-  handle('actionables:list', db.listActionables); handle('actionables:update', (id, patch) => { updateActionable(validateId(id), patch); changed() })
   handle('activity-log:list', getActivityLog); handle('activity-log:clear', clearActivityLog)
   const media = new Map<string, Set<import('node:fs').ReadStream>>()
   const deletion = new RecordingDeletionService({ dataPath, device: { getState: () => ({ phase: 'disconnected', device: null, error: null, scanProgress: null, downloadProgress: null }), deleteFile: async () => null }, pause: (id, action) => queue.withRecordingPaused(id, action), waitPlayback: async id => { for (const stream of media.get(id) ?? []) stream.destroy(); media.delete(id); await waitForPlayback(id) }, dismissDownload: () => undefined, changed, deferDevice: row => { const upload = db.queryOne<{ serial: string; device_filename: string; size: number; checksum: string }>('SELECT * FROM server_uploads WHERE recording_id=? AND serial IS NOT NULL', [row.id]); if (upload) db.run('INSERT OR IGNORE INTO server_device_commands(id,serial,filename,size,checksum,created_at) VALUES (?,?,?,?,?,?)', [randomUUID(), upload.serial, upload.device_filename, upload.size, upload.checksum, new Date().toISOString()]); else if (row.device_serial && row.checksum) db.run('INSERT OR IGNORE INTO server_device_commands(id,serial,filename,size,checksum,created_at) VALUES (?,?,?,?,?,?)', [randomUUID(), row.device_serial, row.filename, row.file_size, row.checksum, new Date().toISOString()]); db.run('DELETE FROM server_uploads WHERE recording_id=?', [row.id]); db.run('DELETE FROM server_captures WHERE recording_id=?', [row.id]) } })
@@ -115,7 +117,7 @@ export async function createApplication(options: ServerOptions) {
   const backup = () => backups.create(join(backupPath, 'HiDockNotes-' + new Date().toISOString().replaceAll(':', '-') + '.tar.gz'))
   handle('backup:get-state', () => backups.state()); handle('backup:create', backup); handle('backup:cancel', () => backups.cancel())
   handle('restore:state', () => restore.state()); handle('restore:cancel', () => restore.cancel())
-  handle('restore:confirm', async (id, confirmed) => { if (confirmed !== true || restore.state().preview?.id !== id) throw new Error('Verify and confirm the backup first.'); if (!options.onRestore) throw new Error('Restore requires a managed server restart.'); maintenance = true; try { await conversations.stop(); await queue.stop(); await search.stop(); await calendar.stop(); await deletion.drain(); if (!await backup()) throw new Error('Safety backup was cancelled.'); await restore.schedule(validateId(id)); options.onRestore(); return true } catch (error) { maintenance = false; if (options.processing !== false) { queue.start(); calendar.start(); await search.initialize() }; throw error } })
+  handle('restore:confirm', async (id, confirmed) => { if (confirmed !== true || restore.state().preview?.id !== id) throw new Error('Verify and confirm the backup first.'); if (!options.onRestore) throw new Error('Restore requires a managed server restart.'); maintenance = true; try { await briefings.stop(); await conversations.stop(); await queue.stop(); await search.stop(); await calendar.stop(); await deletion.drain(); if (!await backup()) throw new Error('Safety backup was cancelled.'); await restore.schedule(validateId(id)); options.onRestore(); return true } catch (error) { maintenance = false; briefings.resume(); if (options.processing !== false) { queue.start(); calendar.start(); await search.initialize() }; throw error } })
   await registerUploads(app, dataPath, id => { if (options.processing !== false) queue.enqueue(id); changed() })
   app.get('/healthz', async () => ({ status: maintenance ? 'maintenance' : 'ok', version: product.version }))
   app.post<{ Params: { operation: string }; Body: { args: unknown[] } }>('/api/v1/rpc/:operation', async (request, reply) => { if (maintenance) return reply.code(503).send({ error: 'The library is restarting after restore.' }); if (!Array.isArray(request.body?.args) || request.body.args.length > 8) throw new Error('Invalid operation arguments.'); return { result: await invoke(request.params.operation, request.body.args) ?? null } })
@@ -166,7 +168,7 @@ export async function createApplication(options: ServerOptions) {
   }
   if (options.processing !== false) { queue.start(); calendar.start(); await search.initialize() }
   const interval = setInterval(() => { if (!maintenance && !backups.busy) void backup().catch(() => emitActivityLog('error', 'Scheduled library backup failed.')) }, 24 * 3600000); interval.unref()
-  app.addHook('preClose', async () => { for (const client of clients) client.end(); for (const playing of media.values()) for (const stream of playing) stream.destroy(); chatgpt.close(); await Promise.allSettled([conversations.stop(), queue.stop(), calendar.stop(), search.stop(), backups.stop()]) })
-  app.addHook('onClose', async () => { clearInterval(interval); for (const client of clients) client.end(); chatgpt.close(); await conversations.stop(); await queue.stop(); await calendar.stop(); await search.stop(); await backups.stop(); await restore.stop(); await deletion.drain(); db.closeDatabase(); clearProcedures() })
+  app.addHook('preClose', async () => { for (const client of clients) client.end(); for (const playing of media.values()) for (const stream of playing) stream.destroy(); chatgpt.close(); await Promise.allSettled([briefings.stop(), conversations.stop(), queue.stop(), calendar.stop(), search.stop(), backups.stop()]) })
+  app.addHook('onClose', async () => { clearInterval(interval); for (const client of clients) client.end(); chatgpt.close(); await briefings.stop(); await conversations.stop(); await queue.stop(); await calendar.stop(); await search.stop(); await backups.stop(); await restore.stop(); await deletion.drain(); db.closeDatabase(); clearProcedures() })
   return app
 }

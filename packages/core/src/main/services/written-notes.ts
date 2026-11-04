@@ -1,6 +1,7 @@
+import { NOTE_FORMAT_VERSION } from '../../../src/shared/notes'
 import { createHash, randomUUID } from 'node:crypto'
 import type { LibraryScope, NoteCreate, NoteListOptions, NoteMutationResult, NotePage, NoteReadPage, NoteSave, NoteSearchOptions, NoteSearchPage, NoteRevision, WrittenNote, WrittenNoteView } from '../../../src/shared/notes'
-import { duplicateNoteDocument, emptyNoteDocument, exportNoteDocument, NOTE_LIMITS, notePlainText, projectNoteBlocks, validateNoteDocument } from '../../../src/shared/note-document'
+import { duplicateNoteDocument, emptyNoteDocument, exportNoteDocument, NOTE_LIMITS, notePlainText, projectNoteBlocks, validateNoteDocument, needsRichNoteFormat } from '../../../src/shared/note-document'
 import { queryAll, queryOne, run, runInTransaction } from './database'
 import { validateId } from '../ipc/jensen-validation'
 
@@ -60,7 +61,7 @@ export class WrittenNotes {
   save(id:string,input:NoteSave):NoteMutationResult { return this.change(id,input) }
   move(id:string,projectId:string|null,expectedRevision:number,mutationId:string):NoteMutationResult {
     const current=this.get(id)
-    return this.change(id,{title:current.title,document:current.document,tags:current.tags,expectedRevision,mutationId},project(projectId),{kind:'move',projectId,expectedRevision})
+    return this.change(id,{formatVersion:NOTE_FORMAT_VERSION,title:current.title,document:current.document,tags:current.tags,expectedRevision,mutationId},project(projectId),{kind:'move',projectId,expectedRevision})
   }
   remove(id:string,expectedRevision:number,confirmed:boolean):{status:'deleted'}|{status:'conflict';current:WrittenNote} {
     if(confirmed!==true)throw Error('Confirm before deleting this written note.')
@@ -70,7 +71,7 @@ export class WrittenNotes {
     runInTransaction(()=>run('DELETE FROM written_notes WHERE id=? AND revision=?',[id,expectedRevision]));this.dependencies.changed({id,deleted:true});return{status:'deleted'}
   }
   history(id:string):NoteRevision[] { this.get(id);return queryAll<{revision:number;snapshot_json:string;created_at:string}>('SELECT revision,snapshot_json,created_at FROM written_note_versions WHERE note_id=? ORDER BY revision DESC',[id]).map(row=>({revision:row.revision,title:(JSON.parse(row.snapshot_json) as WrittenNote).title,createdAt:row.created_at})) }
-  restoreRevision(id:string,revision:number,expectedRevision:number,mutationId:string):NoteMutationResult { const saved=this.get(id,revision);return this.save(id,{title:saved.title,document:saved.document,tags:saved.tags,expectedRevision,mutationId}) }
+  restoreRevision(id:string,revision:number,expectedRevision:number,mutationId:string):NoteMutationResult { const saved=this.get(id,revision);return this.save(id,{formatVersion:NOTE_FORMAT_VERSION,title:saved.title,document:saved.document,tags:saved.tags,expectedRevision,mutationId}) }
   export(id:string,format:'markdown'|'text'):{text:string;filename:string} {
     if(format!=='markdown'&&format!=='text')throw Error('Choose Markdown or plain text.')
     const note=this.get(id);return{text:exportNoteDocument(note.title,note.projectName,note.document,format==='markdown'),filename:(note.title.replace(/[<>:"/\\|?*\x00-\x1f]/g,'-').slice(0,100)||'note')+(format==='markdown'?'.md':'.txt')}
@@ -95,12 +96,14 @@ export class WrittenNotes {
   }
   private readBlockCursor(cursor:string):string { try{const value=JSON.parse(Buffer.from(cursor,'base64url').toString('utf8'));if(typeof value.page!=='string')throw Error();return value.page}catch{throw Error('Invalid note block cursor.')} }
   private change(id:string,input:NoteSave,projectId?:string|null,identity?:unknown):NoteMutationResult {
+    if(input.formatVersion!==undefined&&input.formatVersion!==NOTE_FORMAT_VERSION)throw Error('Update app before saving this note format.')
     validateId(id);const mutation=requestId(input.mutationId),revision=integer(input.expectedRevision,1),name=title(input.title),content=validateNoteDocument(input.document),labels=tags(input.tags),payload=createHash('sha256').update(JSON.stringify(identity??{revision,name,content,labels,projectId})).digest('hex')
     let committed=false
     const result=runInTransaction<NoteMutationResult>(()=>{
       const existing=queryOne<{payload_hash:string;revision:number}>('SELECT payload_hash,revision FROM written_note_mutations WHERE note_id=? AND mutation_id=?',[id,mutation])
       if(existing){if(existing.payload_hash!==payload)throw Error('This mutation ID was used for a different note change.');return{status:'saved',note:this.get(id,existing.revision)}}
       const current=this.get(id);if(current.revision!==revision)return{status:'conflict',current}
+      if(needsRichNoteFormat(current.document)&&input.formatVersion!==NOTE_FORMAT_VERSION)throw Error('Update app before editing this note. Its formatting needs the newer editor; your saved note has not changed.')
       const now=(this.dependencies.now?.()??new Date()).toISOString()
       run('UPDATE written_notes SET title=?,document_json=?,plain_text=?,project_id=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?',[name,JSON.stringify(content),notePlainText(content),projectId===undefined?current.projectId:projectId,now,id,revision]);this.saveTags(id,labels);this.snapshot(id)
       run('INSERT INTO written_note_mutations(note_id,mutation_id,payload_hash,revision) VALUES (?,?,?,?)',[id,mutation,payload,revision+1]);run('DELETE FROM written_note_mutations WHERE note_id=? AND revision<=?',[id,revision+1-NOTE_LIMITS.history]);committed=true

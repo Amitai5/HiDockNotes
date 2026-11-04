@@ -22,12 +22,12 @@ describe('subscription Responses provider', () => {
     expect(body).toMatchObject({ model: 'gpt-6.1-sol', store: false, stream: true, instructions: 'Use transcript evidence.', input: [{ role: 'user', content: 'Evidence' }] })
     for (const forbidden of ['max_output_tokens', 'previous_response_id', 'background', 'conversation', 'temperature', 'prompt', 'tools']) expect(body).not.toHaveProperty(forbidden)
   })
-  it('creates timestamped action items using streamed structured summaries', async () => {
+  it('reads streamed summaries while ignoring retired task extraction', async () => {
     const text = JSON.stringify({ title: 'Plan', meetingType: 'Planning', participants: [], tags: ['planning', 'operations', 'meeting'], summary: 'Dana will send the plan.', actionItems: [{ text: 'Send the plan', owner: 'Dana', start: 4, dueDate: null }] })
     const { client, create } = mockClient([completed(text)])
     const provider = new ChatGPTProvider(async () => 'access', () => client)
     const result = await provider.summarize('gpt-6.1-sol', [{ id: 'one', start: 4, end: 9, text: 'I will send the plan.', speakerId: null, speakerName: 'Dana' }], DEFAULT_AI_SETTINGS)
-    expect(result.actionItems).toEqual([{ text: 'Send the plan', owner: 'Dana', start: 4, dueDate: null }])
+    expect(result.actionItems).toEqual([])
     expect(create.mock.calls[0][0]).toMatchObject({ text: { format: { type: 'json_schema', strict: true } } })
   })
   it.each([[{ type: 'response.output_text.delta', delta: 'Unfinished' }], [{ type: 'response.incomplete', response: {} }]])('rejects incomplete streams instead of persisting partial answers', async events => {

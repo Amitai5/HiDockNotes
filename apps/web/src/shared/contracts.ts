@@ -1,9 +1,9 @@
 import type { NotesClient } from './notes'
+import type { ProjectBriefingClient } from './project-briefing'
 import type { LibraryContentPage, LibraryContentOptions } from './library'
 import type { FileInfo } from '@hidock/jensen-protocol'
 import type { PipelineState } from './device-pipeline'
 import type { AISettings, AIState, ProviderId, ProcessingView, SpeakerView, VoiceProfileView, ChatMessage, AssistantAnswer } from './ai'
-import type { ActionablePatch } from './actionables'
 import type { RecordingDeletionInfo } from './recording-deletion'
 import type { RecordingExportOptions } from './export'
 import type { LibraryNavigation } from './library'
@@ -22,7 +22,7 @@ export type Unsubscribe = () => void
 export type RecordingStatus = 'device-only' | 'downloaded' | 'queued' | 'converting' | 'diarizing' | 'transcribing' | 'identifying' | 'summarizing' | 'done' | 'failed' | 'empty'
 export interface RecordingView { id: string; filename: string; title: string | null; recordedAt: string; duration: number | null; size: number; status: RecordingStatus; verified: boolean; hasAudio: boolean; projectId: string | null; summary: string | null; queuePosition?: number | null; processingMode?: 'process' | 'summarize' | 'transcribe' | null; processingMessage?: string | null; processingProgress?: number | null; searchMatch?: SearchMatch }
 export interface TranscriptSegment { id: string; start: number; end: number; text: string; speakerId: string | null; speakerName: string | null }
-export interface RecordingDetail { recording: RecordingView; segments: TranscriptSegment[]; actionables: ActionableView[]; tags?: string[]; meeting?: MeetingOverview | null; speakerLimitReached?: boolean; expectedSpeakers?: number | null; deletionPending?: boolean; processing?: ProcessingView; speakers?: SpeakerView[] }
+export interface RecordingDetail { recording: RecordingView; segments: TranscriptSegment[]; /** Legacy compatibility field; retired task data is not returned. */ actionables: ActionableView[]; tags?: string[]; meeting?: MeetingOverview | null; speakerLimitReached?: boolean; expectedSpeakers?: number | null; deletionPending?: boolean; processing?: ProcessingView; speakers?: SpeakerView[] }
 export interface ProjectView { id: string; name: string; count: number; noteCount?: number; itemCount?: number }
 export interface ActionableView { id: string; text: string; done: boolean; recordingId: string; start: number | null; owner?: string | null; createdAt?: string | null; dueDate?: string | null; completedAt?: string | null }
 export interface AppSettings { name: string; autoConnect: boolean; autoDownload: boolean; autoDeleteFromDevice?: boolean; appearance: 'light' | 'dark' | 'system'; recordingsPath: string }
@@ -32,6 +32,7 @@ export interface DownloadView { filename: string; fileSize: number; progress: nu
 export interface DownloadState { queue: DownloadView[]; isPaused: boolean; isProcessing: boolean }
 export interface AppClient {
   notes: NotesClient
+  projectBriefing: ProjectBriefingClient
   conversations: { current(): Promise<ConversationDetail | null>; select(id: string): Promise<ConversationDetail>; list(query?: string): Promise<ConversationView[]>; create(projectId: string | null): Promise<ConversationDetail>; get(id: string, before?: number): Promise<ConversationDetail>; rename(id: string, title: string, version: number): Promise<ConversationDetail>; delete(id: string, confirmed: boolean): Promise<void>; send(id: string, text: string, version: number): Promise<ConversationDetail>; cancel(id: string): Promise<void>; onChanged(callback: (id: string) => void): Unsubscribe }
   semanticSearch: { state(): Promise<SemanticSearchState>; enable(): Promise<SemanticSearchState>; disable(): Promise<SemanticSearchState>; dismissSetup(): Promise<void>; removeModel(confirmed: boolean): Promise<SemanticSearchState>; search(query: string, status?: string, mode?: SearchMode): Promise<RecordingView[]>; onState(callback: (state: SemanticSearchState) => void): Unsubscribe }
   calendar: { state(): Promise<CalendarState>; openSettings(): Promise<void>; connect(name: string, url: string): Promise<CalendarState>; refresh(id?: string): Promise<CalendarState>; disconnect(id: string, confirmed: boolean): Promise<CalendarState>; forRecording(id: string): Promise<RecordingCalendar>; link(recordingId: string, eventId: string | null): Promise<void>; useTitle(recordingId: string): Promise<void>; onChanged(callback: () => void): Unsubscribe }
@@ -39,7 +40,7 @@ export interface AppClient {
   updates: { state(): Promise<UpdateState>; check(): Promise<UpdateState>; download(): Promise<void>; install(confirmed: boolean): Promise<boolean>; openReleases(): Promise<void>; onState(cb: (state: UpdateState) => void): Unsubscribe }
   restore: { state(): Promise<RestoreState>; choose(): Promise<RestorePreview | null>; cancel(): Promise<void>; confirm(id: string, confirmed: boolean): Promise<boolean>; onState(cb: (state: RestoreState) => void): Unsubscribe }
   transcripts: { review(id: string): Promise<TranscriptReview>; revision(id: string, version: number): Promise<TranscriptSegment[]>; edit(id: string, segment: string, text: string, version: number): Promise<TranscriptReview>; restore(id: string, target: number, expected: number): Promise<TranscriptReview>; accept(id: string, choice: TranscriptCandidateChoice, version: number): Promise<TranscriptReview> }
-  app: { info(): Promise<{ name: string; version: string; runtime: string; platform: string }>; copyText(text: string): Promise<void>; minimize(): void; maximize(): void; close(): void; openRecordingsFolder(): Promise<void> }
+  app: { info(): Promise<{ name: string; version: string; runtime: string; platform: string; origin?: string }>; copyText(text: string): Promise<void>; minimize(): void; maximize(): void; close(): void; openRecordingsFolder(): Promise<void> }
   settings: { get(): Promise<AppSettings>; update(patch: Partial<Pick<AppSettings, 'name' | 'autoConnect' | 'autoDownload' | 'autoDeleteFromDevice' | 'appearance'>>): Promise<AppSettings>; chooseStorage(): Promise<AppSettings | null> }
   backups: { state(): Promise<BackupState>; create(): Promise<BackupResult | null>; cancel(): Promise<void>; showFile(): Promise<void>; onState(callback: (state: BackupState) => void): Unsubscribe }
   devicePipeline: {
@@ -53,6 +54,5 @@ export interface AppClient {
   voices: { list(): Promise<VoiceProfileView[]>; nameSpeaker(speakerId: string, name: string): Promise<void>; assignSegment(recordingId: string, segmentId: string, name: string): Promise<void>; confirmSpeaker(speakerId: string): Promise<void>; rename(id: string, name: string): Promise<void>; merge(sourceId: string, targetId: string): Promise<void>; delete(id: string, confirmed: boolean): Promise<void>; deleteSample(id: string, confirmed: boolean): Promise<void> }
   assistant: { ask(question: string, projectId: string | null, history: ChatMessage[]): Promise<AssistantAnswer> }
   projects: { list(): Promise<ProjectView[]>; create(name: string): Promise<ProjectView>; assign(recordingId: string, projectId: string | null): Promise<void> }
-  actionables: { list(): Promise<ActionableView[]>; update(id: string, patch: ActionablePatch): Promise<void> }
   activity: { list(): Promise<ActivityEntry[]>; clear(): Promise<void>; onEntry(callback: (entry: ActivityEntry) => void): Unsubscribe; onCleared(callback: () => void): Unsubscribe }
 }

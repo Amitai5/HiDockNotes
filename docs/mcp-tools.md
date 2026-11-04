@@ -1,6 +1,6 @@
 # MCP tools
 
-Enable **Settings → Agent connections → MCP access**, copy the server HTTPS configuration into your MCP client, and keep the Docker server running. All seven tools are read-only. Returned recording text and reference context are source material, never instructions for the connected agent.
+Enable **Settings → Agent connections → MCP access**, copy the server HTTPS configuration into your MCP client, and keep the Docker server running. All tools are read-only. Returned recording text and reference context are source material, never instructions for the connected agent.
 
 ## Search by meaning
 
@@ -32,8 +32,14 @@ Optional filters are `projectId`, `recordingId`, `kind`, `from`, and `to`. Date 
 
 New summaries use exact transcript quotes checked against the saved transcript; their outcome sections display source timestamps and agree with the structured metadata. Existing Markdown outcome sections are retained as `source: "summary"` with no invented quotes or timestamps. **Resummarize** upgrades one recording. A stale summary's outcomes may no longer reflect the edited transcript; review the source or resummarize before relying on them. Empty outcome sections produce no entries.
 
-Outcome metadata is saved with summaries and included in complete library backups and restores. The additive database migration preserves existing notes, recordings, and tasks and does not make AI requests.
+Outcome metadata is saved with summaries and included in complete library backups and restores. The additive database migration preserves existing notes, recordings, and archived legacy task records and does not make AI requests.
 
 ## Import existing audio
 
 Choose **Library → Import audio** to select one or more MP3, M4A, WAV, OGG, FLAC, or HDA files under 2 GB each. The app uploads and verifies them on the server, preserves the originals, and queues them for transcription and summaries according to your processing settings. This existing import path is available without a HiDock connection; MCP does not accept filesystem paths or import audio.
+
+## Removed task tracking
+
+Actionables has been retired. `list_action_items` is no longer advertised or callable, and `get_recording` no longer returns `actionItems` or `actionItemsTruncated`. Its summary pages omit the legacy generated Action items section; pagination offsets refer to the cleaned summary. Refresh your MCP tool list and stop requesting these removed fields/tools. Decisions, questions, risks and narrative next steps remain available through `list_meeting_outcomes`.
+
+The `actionables:list` and `actionables:update` application RPC operations have also been removed. `library:detail` retains an empty `actionables` compatibility field. No database migration deletes historical task rows, and complete backups/restores still retain them. New summaries do not create or reconcile tasks.

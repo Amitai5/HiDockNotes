@@ -6,7 +6,7 @@ export function registerNoteHandlers(notes:WrittenNotes):void {
   handle('notes:list',(value={})=>notes.list(input<NoteListOptions>(value,['scope','query','limit','cursor'])))
   handle('notes:get',(id,revision)=>notes.get(id,revision))
   handle('notes:create',value=>notes.create(input<NoteCreate>(value,['requestId','projectId','sourceId','title','document','tags'])))
-  handle('notes:save',(id,value)=>notes.save(id,input<NoteSave>(value,['title','document','tags','expectedRevision','mutationId'])))
+  handle('notes:save',(id,value)=>notes.save(id,input<NoteSave>(value,['title','document','tags','expectedRevision','mutationId','formatVersion'])))
   handle('notes:move',(id,project,revision,mutation)=>notes.move(id,project,revision,mutation))
   handle('notes:delete',(id,revision,confirmed)=>notes.remove(id,revision,confirmed))
   handle('notes:history',id=>notes.history(id))

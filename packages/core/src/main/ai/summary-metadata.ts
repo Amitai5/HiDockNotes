@@ -1,7 +1,6 @@
 import type { TranscriptSegment } from '../../../src/shared/contracts'
 import type { MeetingParticipant } from '../../../src/shared/meeting'
 import { MAX_MEETING_PARTICIPANTS } from '../../../src/shared/meeting'
-import type { SummaryResult } from './providers'
 
 const normalized = (value: string): string => value.trim().replace(/\s+/g, ' ').toLowerCase()
 export function groundedName(name: string, segments: TranscriptSegment[]): boolean {
@@ -48,11 +47,4 @@ export function parseMeetingParticipants(value: unknown, segments: TranscriptSeg
     if (!names.has(normalized(name))) { names.add(normalized(name)); output.push({ speakerId: id, name, organizer: false }) }
   }
   return output
-}
-function cell(value: string): string { return value.replaceAll('|', '\\|').replace(/[\r\n]+/g, ' ') }
-export function renderSummaryActions(summary: SummaryResult): void {
-  const table = summary.actionItems.length ? '| Task | Owner | Due date |\n| --- | --- | --- |\n' + summary.actionItems.map(item => `| ${cell(item.text)} | ${cell(item.owner ?? 'Unassigned')} | ${item.dueDate ?? 'No date'} |`).join('\n') : 'None recorded.'
-  const section = /^## Action items\s*\n[\s\S]*?(?=^## |$(?![\s\S]))/m
-  if (section.test(summary.summary)) summary.summary = summary.summary.replace(section, () => '## Action items\n\n' + table + '\n\n')
-  else summary.summary += '\n\n## Action items\n\n' + table
 }

@@ -32,7 +32,7 @@ export class TranscriptionQueue {
     const chatgpt = this.dependencies.chatgpt?.state()
     const transcriptionMissing = settings.transcription.provider !== 'local' && !providers.find(item => item.provider === settings.transcription.provider)?.verified
     const subscriptionMissing = settings.chat.provider === 'chatgpt' && !chatgpt?.planEnabled
-    const summaryReason = subscriptionMissing ? 'Continue with ChatGPT in Settings and authorize plan usage for summaries.' : settings.chat.provider === 'chatgpt' && chatgpt?.usageBlocked ? chatgpt.error ?? 'ChatGPT plan requests are paused. Open Manage usage in Settings.' : settings.chat.provider !== 'chatgpt' && !providers.find(item => item.provider === settings.chat.provider)?.verified ? `Verify ${settings.chat.provider === 'gemini' ? 'Gemini' : 'OpenAI'} in Settings for summaries and action items.` : null
+    const summaryReason = subscriptionMissing ? 'Continue with ChatGPT in Settings and authorize plan usage for summaries.' : settings.chat.provider === 'chatgpt' && chatgpt?.usageBlocked ? chatgpt.error ?? 'ChatGPT plan requests are paused. Open Manage usage in Settings.' : settings.chat.provider !== 'chatgpt' && !providers.find(item => item.provider === settings.chat.provider)?.verified ? `Verify ${settings.chat.provider === 'gemini' ? 'Gemini' : 'OpenAI'} in Settings for summaries.` : null
     const reason = transcriptionMissing ? `Verify ${settings.transcription.provider === 'gemini' ? 'Gemini' : 'OpenAI'} in Settings to start transcription.` : null
     const paused = this.reviewPaused ? REVIEW_PAUSED_MESSAGE : null
     return { settings, providers, ready: !reason && !paused, reason: paused ?? reason, chatgpt, summaryReady: !summaryReason && !paused, summaryReason: paused ?? summaryReason, queue: this.queueView() }
@@ -222,7 +222,7 @@ export class TranscriptionQueue {
           this.dependencies.activity('success', 'Transcript is ready. The summary is queued separately.')
           return
         }
-        this.dependencies.activity(result.empty ? 'info' : 'success', result.empty ? 'Skipped an empty recording after local audio checks.' : result.summary ? 'Transcript, summary and action items are ready.' : 'Local transcript is ready. Configure a summary provider to add a summary and action items.')
+        this.dependencies.activity(result.empty ? 'info' : 'success', result.empty ? 'Skipped an empty recording after local audio checks.' : result.summary ? 'Transcript and summary are ready.' : 'Local transcript is ready. Configure a summary provider to add a summary.')
       }
     } catch (error) {
       if (!this.stopped && !this.paused.has(recording.id)) {

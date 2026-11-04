@@ -1,3 +1,4 @@
+import { randomId } from '../shared/ids'
 import type {NoteCreate,NoteMutationResult,NoteSave,NotesClient,WrittenNote} from '../shared/notes'
 import {duplicateNoteDocument} from '../shared/note-document'
 import type {NoteDraft} from './note-drafts'
@@ -20,7 +21,7 @@ export class NoteSession {
   private remotePending=false
   private copyRequest:{input:NoteCreate;fingerprint:string}|null=null
   private storage:Promise<void>=Promise.resolve()
-  constructor(note:WrittenNote,private readonly api:NotesClient,private readonly store:Store,private readonly mutationId:()=>string=()=>crypto.randomUUID()){
+  constructor(note:WrittenNote,private readonly api:NotesClient,private readonly store:Store,private readonly mutationId:()=>string=()=>randomId()){
     this.state={note,draft:fields(note),status:'saved',error:'',storageError:'',conflict:null,recovery:null};this.savedFingerprint=fingerprint(this.state.draft);this.baseRevision=note.revision
   }
   getSnapshot=():NoteSessionState=>this.state

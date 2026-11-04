@@ -1,7 +1,7 @@
 import { BrowserControls } from './components/BrowserControls'
 import { useEffect } from 'react'
 import { createHashRouter, RouterProvider, Navigate, Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, BookOpen, CheckSquare, MessageSquare, Menu, Search, Settings, RefreshCw, X } from 'lucide-react'
+import { Activity, BookOpen, MessageSquare, Menu, Search, Settings, RefreshCw, X } from 'lucide-react'
 import product from '../product.json'
 import { useDevicePipeline } from './hooks/useDevicePipeline'
 import { useDeviceSubscriptions } from './hooks/useDeviceSubscriptions'
@@ -11,7 +11,6 @@ import { SyncPage, modelName } from './pages/SyncPage'
 import { LibraryPage } from './pages/LibraryPage'
 import { LibrarySidebar } from './components/LibrarySidebar'
 import { LibraryNavigationProvider } from './hooks/useLibraryNavigation'
-import { ActionablesPage } from './pages/ActionablesPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { AssistantPage } from './pages/AssistantPage'
 import { ResizableNavigation } from './components/ResizableNavigation'
@@ -20,7 +19,7 @@ import { CreateProjectFolder } from './components/CreateProjectFolder'
 import { WebUpdateNotice } from './components/WebUpdatesPanel'
 
 const sections = [
-  { label: 'Knowledge', items: [{ label: 'Library', path: '/library', Icon: BookOpen }, { label: 'Actionables', path: '/actionables', Icon: CheckSquare }, { label: 'Assistant', path: '/assistant', Icon: MessageSquare }] },
+  { label: 'Knowledge', items: [{ label: 'Library', path: '/library', Icon: BookOpen }, { label: 'Assistant', path: '/assistant', Icon: MessageSquare }] },
   { label: 'Device & settings', items: [{ label: 'Sync', path: '/sync', Icon: RefreshCw }, { label: 'Settings', path: '/settings', Icon: Settings }] }
 ]
 function Shell(): JSX.Element {
@@ -47,7 +46,7 @@ function Shell(): JSX.Element {
   return <ResizableNavigation>
     <header className="titlebar"><div className="brand"><BrandMark /><span>{product.name}</span></div><details className="mobile-navigation"><summary aria-label="Open navigation"><Menu size={19} /></summary><nav aria-label="Mobile navigation">{sections.flatMap(section => section.items).map(({ label, path, Icon }) => <Link key={path} to={path} onClick={event => event.currentTarget.closest('details')?.removeAttribute('open')}><Icon size={16} />{label}</Link>)}<CreateProjectFolder /></nav></details><form className="global-search input-with-icon" onSubmit={e => { e.preventDefault(); navigate('/library') }}><Search size={17} /><input aria-label="Search your library" placeholder="Search your library" value={search} onChange={e => { setSearch(e.target.value); if (e.target.value) navigate('/library') }} /><kbd>Enter</kbd></form>{connected && <div className="device-chip connected"><span />{modelName(device.state.device?.model)} <b>·</b> Connected</div>}<button className="activity-trigger" onClick={() => setActivityOpen(true)}><Activity size={17} className={active ? 'pulse-accent' : ''} /><span>Activity</span></button><BrowserControls /></header>
     <aside className="sidebar" id="navigation-sidebar" aria-label="Main navigation"><nav>{sections.map(section => <div className="nav-section" key={section.label}>{section.items.map(({ label, path, Icon }) => path === '/library' ? <LibrarySidebar key={path} /> : <NavLink key={path} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} to={path}><Icon size={18} strokeWidth={1.7} /><span>{label}</span>{path === '/sync' && unsynced > 0 && <span className="nav-badge">{unsynced}</span>}</NavLink>)}</div>)}</nav></aside>
-    <main className={`main-content${location.pathname === '/assistant' ? ' assistant-content' : location.pathname === '/library' || location.pathname.startsWith('/library/') || location.pathname.startsWith('/notes/') ? ' library-content' : ''}`}><Routes><Route path="/" element={<Navigate to="/library" replace />} /><Route path="/sync" element={<SyncPage device={device} />} /><Route path="/today" element={<Navigate to="/library" replace />} /><Route path="/assistant" element={<AssistantPage />} /><Route path="/library" element={<LibraryPage />} /><Route path="/notes/:noteId" element={<LibraryPage />} /><Route path="/library/:id" element={<LibraryPage />} /><Route path="/projects" element={<Navigate to="/library" replace />} /><Route path="/actionables" element={<ActionablesPage />} /><Route path="/settings" element={<SettingsPage />} /></Routes></main>
+    <main className={`main-content${location.pathname === '/assistant' ? ' assistant-content' : location.pathname === '/library' || location.pathname.startsWith('/library/') || location.pathname.startsWith('/notes/') ? ' library-content' : ''}`}><Routes><Route path="/" element={<Navigate to="/library" replace />} /><Route path="/sync" element={<SyncPage device={device} />} /><Route path="/today" element={<Navigate to="/library" replace />} /><Route path="/assistant" element={<AssistantPage />} /><Route path="/library" element={<LibraryPage />} /><Route path="/notes/:noteId" element={<LibraryPage />} /><Route path="/library/:id" element={<LibraryPage />} /><Route path="/projects" element={<Navigate to="/library" replace />} /><Route path="/actionables" element={<Navigate to="/library" replace />} /><Route path="/settings" element={<SettingsPage />} /></Routes></main>
     {error && <div className="error-toast" role="alert"><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError(null)}><X size={16} /></button></div>}
     <WebUpdateNotice />
     <ActivityLog />

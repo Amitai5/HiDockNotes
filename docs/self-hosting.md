@@ -123,7 +123,7 @@ This uses HiDockNotes' existing ChatGPT authorization flow, not Codex or ChatGPT
 
 Use **Settings → Device & storage → Create backup**, then **Download backup**. The server also creates a backup every 24 hours while running. Archives are written to `/backups`, outside the active `/data` directory. Keep the backup dataset in your TrueNAS snapshot and replication policy; a second dataset on the same pool alone is not an independent copy.
 
-Archives contain the consistent SQLite snapshot and all complete recording audio: transcripts and corrections/history, summaries and structured outcomes, action items and completion/dates, folders, tags, remembered people and voice embeddings, saved chats and citations, calendar metadata, settings, and server metadata. Downloadable models, caches, incomplete transfers, and the server encryption key are excluded. Reconnect AI accounts, calendars, and MCP after restore. Back up `/data/secrets` separately through your NAS recovery policy if you want to recover the server key as well.
+Archives contain the consistent SQLite snapshot and all complete recording audio: transcripts and corrections/history, summaries and structured outcomes, archived legacy task data and completion/dates, folders, tags, remembered people and voice embeddings, saved chats and citations, calendar metadata, settings, and server metadata. Downloadable models, caches, incomplete transfers, and the server encryption key are excluded. Reconnect AI accounts, calendars, and MCP after restore. Back up `/data/secrets` separately through your NAS recovery policy if you want to recover the server key as well.
 
 To migrate your desktop library:
 
@@ -141,7 +141,7 @@ To update, create a backup, change the pinned version, and run `docker compose p
 
 ## MCP
 
-Enable MCP in Settings and copy its configuration. This creates a separate read-only bearer token for `/api/v1/mcp`, which uses stateless Streamable HTTP JSON-RPC. Turning MCP access off revokes all issued tokens. Tools list projects/recordings, search by keyword or optional meaning, read full notes/transcripts, list action items and meeting outcomes, and read global/project reference context. No tool deletes recordings or changes settings.
+Enable MCP in Settings and copy its configuration. This creates a separate read-only bearer token for `/api/v1/mcp`, which uses stateless Streamable HTTP JSON-RPC. Turning MCP access off revokes all issued tokens. Tools list projects/recordings, search by keyword or optional meaning, read full notes/transcripts, list meeting outcomes, and read global/project reference context. No tool deletes recordings or changes settings.
 
 ## Build and release
 

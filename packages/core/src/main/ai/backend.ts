@@ -133,7 +133,7 @@ export class LocalTranscriptionBackend implements TranscriptionBackend {
     const checkpoint = { segments, speakers, duration: transcript.duration, speakerLimitReached: transcript.speakerLimitReached }
     observer.checkpoint(checkpoint)
     if (input.summaryReady === false) return { ...checkpoint, summary: null, empty: false }
-    observer.stage('summarizing', 0, 'Creating a title, summary and action items…')
+    observer.stage('summarizing', 0, 'Creating a title and summary…')
     const chat = this.providers(settings.chat.provider, chatKey ?? undefined)
     const summary = await summarizeMeeting(chat, settings.chat.model, segments, settings, input.recordedAt, (progress, message) => observer.stage('summarizing', progress, message), signal, input.referenceContext)
     return { ...checkpoint, summary, empty: false }

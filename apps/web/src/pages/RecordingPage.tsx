@@ -1,14 +1,13 @@
 import { appClient } from '../services/app-client'
 import { libraryUrl } from '../services/note-url'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, CalendarDays, CheckCircle2, FileText, Folder, ListChecks, LoaderCircle, Pause, Pencil, Play, SkipBack, Sparkles, Tags, UsersRound, Volume2 } from 'lucide-react'
+import { ArrowLeft, CalendarDays, CheckCircle2, FileText, Folder, LoaderCircle, Pause, Pencil, Play, SkipBack, Sparkles, Tags, UsersRound, Volume2 } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { ProjectView, RecordingDetail, RecordingView, TranscriptSegment } from '../shared/contracts'
 import type { AIState, SpeakerView } from '../shared/ai'
 import { Button, formatDuration } from '../components/ui'
 import { RecordingTitle } from '../components/RecordingTitle'
 import { MarkdownContent } from '../components/MarkdownContent'
-import { ActionableList } from '../components/ActionableList'
 import { reportError } from '../store/useAppStore'
 import { RecordingWorkspace } from '../components/RecordingWorkspace'
 import { RecordingTags } from '../components/RecordingTags'
@@ -88,10 +87,9 @@ function RecordingContent({ id, onRecordingChange }: { id: string; onRecordingCh
     {detail.deletionPending && <div className="processing-banner danger" role="status"><div><strong>Deletion needs to be completed.</strong><p>Use Delete recording in the menu again to finish the device check and local cleanup.</p></div></div>}
     <div className="recording-notes">
       <section className="recording-summary-section" aria-labelledby="summary-heading"><h2 id="summary-heading"><Sparkles size={18} />Summary</h2>
-        {detail.recording.summary ? <MarkdownContent hideActionItems>{detail.recording.summary}</MarkdownContent> : <p className="muted recording-summary-empty">{pendingSummary ? 'Your local transcript is ready. Connect a summary provider in Settings to add a summary and action items automatically.' : detail.segments.length && retry ? 'The transcript was saved. Retry processing to finish the summary.' : active ? 'A summary will appear when processing finishes.' : 'Process this recording to create a summary.'}</p>}
+        {detail.recording.summary ? <MarkdownContent hideActionItems>{detail.recording.summary}</MarkdownContent> : <p className="muted recording-summary-empty">{pendingSummary ? 'Your local transcript is ready. Connect a summary provider in Settings to add a summary automatically.' : detail.segments.length && retry ? 'The transcript was saved. Retry processing to finish the summary.' : active ? 'A summary will appear when processing finishes.' : 'Process this recording to create a summary.'}</p>}
         {pendingSummary && <Link to="/settings">Set up summaries</Link>}
       </section>
-      <section className="recording-actions" aria-labelledby="recording-actions-heading"><h2 id="recording-actions-heading"><ListChecks size={18} />Action items</h2><ActionableList items={detail.actionables} onChanged={refresh} onSeek={seek} emptyText={detail.recording.summary ? 'No explicit action items were found.' : 'Action items will be extracted when a summary provider is connected.'} /></section>
     </div>
     </div>} media={<>
       <div className="recording-playback"><h2><Play size={15} />Audio recording</h2>
@@ -103,7 +101,7 @@ function RecordingContent({ id, onRecordingChange }: { id: string; onRecordingCh
         const voice = detail.speakers?.find(value => value.id === segment.speakerId)
         const label = segment.speakerName ?? voice?.label ?? 'Unassigned speech'
         return <div key={segment.id} className={`transcript-segment ${position >= segment.start && position < segment.end ? 'current' : ''}`}><button className="transcript-time" aria-label={`Play from ${formatDuration(segment.start)}`} onClick={() => seek(segment.start)}><time>{formatDuration(segment.start)}</time></button><span>{<button className={`speaker-label ${colors.get(label.trim().toLowerCase()) ?? 'speaker-unknown'}`} aria-label={voice ? `Rename ${label}` : `Assign speaker at ${formatDuration(segment.start)}`} onClick={() => openSpeaker(voice ? { speaker: voice } : { segment })}><strong>{label}</strong><Pencil size={12} /></button>}{voice?.suggestedName && <Button className="speaker-suggestion" variant="ghost" onClick={() => { void appClient.voices.confirmSpeaker(voice.id).then(refresh).catch(reportError) }}>Possibly {voice.suggestedName}? <CheckCircle2 size={12} /></Button>}<button className="transcript-text" onClick={() => seek(segment.start)}>{segment.text}</button><button className="transcript-edit-button" aria-label={`Edit excerpt at ${formatDuration(segment.start)}`} title="Edit transcript excerpt" disabled={active || busy} onClick={() => setEdit(segment)}><Pencil size={13} /></button></span></div>
-      }) : <div className="inline-empty">{active ? 'The transcript will appear here as soon as transcription finishes.' : detail.recording.status === 'empty' ? 'This recording contains silence or no usable audio.' : !detail.recording.hasAudio ? 'Download the audio first, then the app can transcribe it.' : 'Set up AI in Settings to turn this recording into a transcript, summary and action items.'}</div>}
+      }) : <div className="inline-empty">{active ? 'The transcript will appear here as soon as transcription finishes.' : detail.recording.status === 'empty' ? 'This recording contains silence or no usable audio.' : !detail.recording.hasAudio ? 'Download the audio first, then the app can transcribe it.' : 'Set up AI in Settings to turn this recording into a transcript and summary.'}</div>}
     </section>
     </>} />
     <SpeakerEditor recordingId={id} edit={speaker} onClose={() => setSpeaker(null)} onSaved={refresh} onClosed={() => speakerTrigger.current?.focus()} />

@@ -6,7 +6,7 @@ The current desktop client uses the Docker server for all library data, backups,
 
 In **Settings → Device & storage → Library backup**, choose a complete `.tar.gz` backup.
 The app streams it into a private staging directory, verifies the archive paths and SHA-256 checksums,
-checks SQLite integrity and its known schema, and previews the recordings, projects, tasks, voices, and tags.
+checks SQLite integrity and its known schema, and previews the recordings, projects, voices, and tags.
 Archives produced by the existing complete-backup feature remain supported.
 
 Restore replaces this computer's library. It does not merge two libraries.
@@ -17,7 +17,7 @@ Original audio in external storage folders is preserved; restored audio receives
 
 Restored AI credentials are disconnected, agent access is disabled, pending downloads are cleared,
 and background processing/automatic device connection are paused for review. Reconnect the accounts you want,
-review Settings, and explicitly resume processing. Metadata, transcript revisions, completed tasks,
+review Settings, and explicitly resume processing. Metadata, transcript revisions, archived legacy task records,
 deadlines, tags, voice profiles, and all embedding samples are restored.
 Device-only audio is available only if it was downloaded before the backup was made.
 

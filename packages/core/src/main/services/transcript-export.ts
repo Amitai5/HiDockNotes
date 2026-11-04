@@ -1,3 +1,4 @@
+import { withoutActionItems } from '../../../src/shared/summary-content'
 import type { RecordingDetail } from '../../../src/shared/contracts'
 import type { ExportContent, TranscriptFormat } from '../../../src/shared/export'
 
@@ -16,8 +17,7 @@ export function exportTranscript(detail: RecordingDetail, format: TranscriptForm
     `${markdown ? '# ' : ''}${detail.recording.title || detail.recording.filename}`, '', detail.recording.recordedAt, '',
     ...(detail.meeting ? [`Meeting type: ${detail.meeting.meetingType}`, `Participants: ${detail.meeting.participants.map(person => person.name + (person.organizer ? ' (Organizer)' : '')).join(', ')}`, ''] : []),
     ...(detail.tags?.length ? [`Tags: ${detail.tags.join(', ')}`, ''] : []),
-    ...(detail.recording.summary ? [`${markdown ? '## ' : ''}Summary`, '', detail.recording.summary, ''] : []),
-    ...(content === 'summary-transcript' && detail.actionables.length ? [`${markdown ? '## ' : ''}Action items`, '', ...detail.actionables.map(item => `${markdown ? '- ' : ''}[${item.done ? 'x' : ' '}] ${item.text}${item.owner ? ` — Owner ${item.owner}` : ''}${item.dueDate ? ` — Due ${item.dueDate}` : ''}${item.start !== null ? ` (${subtitleTime(item.start, '.')})` : ''}`), ''] : []),
+    ...(detail.recording.summary ? [`${markdown ? '## ' : ''}Summary`, '', withoutActionItems(detail.recording.summary), ''] : []),
     ...(content === 'summary-transcript' ? [`${markdown ? '## ' : ''}Transcript`, '', ...detail.segments.map(segment => `[${subtitleTime(segment.start, '.')}] ${segment.speakerName ?? 'Speaker'}: ${segment.text}`), ''] : [])
   ].join('\n')
 }

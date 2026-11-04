@@ -31,9 +31,9 @@ describe('provider timestamp contracts', () => {
     expect(() => parseOpenAITranscript({ text: 'Hello' }, 2)).toThrow('timestamped')
     expect(() => parseOpenAITranscript({ segments: [{ text: 'Hello', start: -1, end: 9 }] }, 2)).toThrow()
   })
-  it('validates summary structure and action evidence timestamps', () => {
-    expect(parseSummary(JSON.stringify({ title: 'Plan', summary: 'Dana will send the plan.', actionItems: [{ text: 'Send the plan', start: 1 }] }), 2).actionItems[0].start).toBe(1)
-    expect(() => parseSummary(JSON.stringify({ title: 'Plan', summary: 'Summary', actionItems: [{ text: 'Invented moment', start: 90 }] }), 2)).toThrow('timestamp')
+  it('accepts summaries without tasks and ignores retired legacy task fields', () => {
+    expect(parseSummary(JSON.stringify({ title: 'Plan', summary: 'A meeting decision.' }), 2).actionItems).toEqual([])
+    expect(parseSummary(JSON.stringify({ title: 'Plan', summary: 'A meeting decision.', actionItems: [{ text: 'Old task', start: 90, dueDate: 'invalid' }] }), 2).actionItems).toEqual([])
     expect(() => parseSummary('not json', 2)).toThrow('incomplete')
   })
   it('does not expose SDK errors, URLs or keys', () => {
@@ -42,13 +42,9 @@ describe('provider timestamp contracts', () => {
     expect(error.retryable).toBe(true)
     expect(providerError({ status: 401 }).retryable).toBe(false)
   })
-  it('accepts explicit deadlines, preserves missing legacy deadlines, and rejects impossible dates', () => {
-    const summary = (dueDate: unknown) => JSON.stringify({ title: 'Plan', summary: 'A plan.', actionItems: [{ text: 'Send plan', start: 1, dueDate }] })
-    expect(parseSummary(summary('2026-10-12'), 2).actionItems[0].dueDate).toBe('2026-10-12')
-    expect(parseSummary(summary(null), 2).actionItems[0].dueDate).toBeNull()
-    expect(() => parseSummary(summary('2026-02-30'), 2)).toThrow('due date')
-    expect(() => parseSummary(summary('tomorrow'), 2)).toThrow('due date')
-    expect(SUMMARY_SCHEMA.properties.actionItems.items.required).toContain('dueDate')
+  it('omits retired task schema and preserves recording-date grounding for narrative next steps', () => {
+    expect(SUMMARY_SCHEMA.properties).not.toHaveProperty('actionItems')
+    expect(SUMMARY_SCHEMA.required).not.toContain('actionItems')
     expect(summaryInstructions(DEFAULT_AI_SETTINGS, { recordedAt: '2026-10-08T12:00:00Z' })).toContain('2026-10-08')
     expect(summaryInstructions(DEFAULT_AI_SETTINGS)).toContain('Do not resolve relative or incomplete dates')
   })

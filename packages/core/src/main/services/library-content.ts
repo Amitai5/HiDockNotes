@@ -1,3 +1,4 @@
+import { withoutActionItems } from '../../../src/shared/summary-content'
 import type { LibraryContentOptions, LibraryContentPage, LibraryContentRow } from '../../../src/shared/library'
 import type { RecordingView } from '../../../src/shared/contracts'
 import { queryAll,queryOne } from './database'
@@ -25,9 +26,9 @@ export function libraryContent(options:LibraryContentOptions={},meaning?:{notes:
   const sql=parts.join(' UNION ALL '),total=queryOne<{count:number}>('SELECT count(*) AS count FROM ('+sql+')',parameters)!.count
   const rows=queryAll<Row>('SELECT * FROM ('+sql+') ORDER BY updatedAt DESC,kind,id LIMIT ? OFFSET ?',[...parameters,limit+1,offset])
   const items=rows.slice(0,limit).map((row):LibraryContentRow=>{
-    const base={id:row.id,title:row.title,projectId:row.projectId,projectName:row.projectName,createdAt:row.createdAt,updatedAt:row.updatedAt,preview:row.preview}
+    const base={id:row.id,title:row.title,projectId:row.projectId,projectName:row.projectName,createdAt:row.createdAt,updatedAt:row.updatedAt,preview:row.kind==='recording'?withoutActionItems(row.preview):row.preview}
     if(row.kind==='note')return{...base,kind:'note',revision:row.revision,tags:JSON.parse(row.tags) as string[]}
-    const recording=JSON.parse(row.recordingJson!) as RecordingView;recording.verified=!!recording.verified;recording.hasAudio=!!recording.hasAudio
+    const recording=JSON.parse(row.recordingJson!) as RecordingView;recording.summary=recording.summary?withoutActionItems(recording.summary):recording.summary;recording.verified=!!recording.verified;recording.hasAudio=!!recording.hasAudio
     return{...base,kind:'recording',recording}
   })
   return{items,total,fallbackReason:meaning?.fallbackReason??null,nextCursor:rows.length>limit?pageCursor(offset+limit,identity):null}

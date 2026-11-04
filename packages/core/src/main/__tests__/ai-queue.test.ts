@@ -89,7 +89,7 @@ describe('persistent processing queue', () => {
     const detail = getDetail(id)
     expect(detail.recording).toMatchObject({ status: 'done', title: 'My recording name', summary: 'Send the plan.' })
     expect(detail.segments[0].text).toBe('I will send the plan.')
-    expect(detail.actionables[0]).toMatchObject({ text: 'Send the plan', start: 0 })
+    expect(detail.actionables).toEqual([])
     expect(JSON.stringify(queryOne('SELECT * FROM transcription_jobs'))).not.toContain('AQ.fake-key')
   })
   it('retries transient errors with persistent backoff and lets the user retry a terminal failure', async () => {

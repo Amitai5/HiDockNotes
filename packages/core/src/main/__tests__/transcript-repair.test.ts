@@ -23,7 +23,8 @@ describe('legacy local transcript artifact recovery', () => {
     expect(listRecordings('BLANK_AUDIO')).toEqual([])
     expect(listRecordings('Ordinary')).toHaveLength(1)
     expect(queryAll('SELECT text,start,end,speaker_id FROM transcript_artifacts ORDER BY start')).toEqual(original.filter((_, index) => index === 1 || index === 3).map(s => ({ text: s.text, start: s.start, end: s.end, speaker_id: s.speakerId })))
-    expect(getDetail(id)).toMatchObject({ recording: { summary: 'Original summary' }, tags: ['original-tag'], actionables: [{ done: true }], speakers: [{ label: 'Dana' }] })
+    expect(getDetail(id)).toMatchObject({ recording: { summary: 'Original summary' }, tags: ['original-tag'], actionables: [], speakers: [{ label: 'Dana' }] })
+    expect(queryOne('SELECT text,done FROM actionables WHERE recording_id=?', [id])).toEqual({ text: 'Already completed task', done: 1 })
     expect(quarantineDecoderArtifacts(findDecoderArtifacts(), '2026-10-13T10:00:00Z')).toBe(0)
   })
   it('does not modify cloud transcripts or delete a segment that changed after scanning', () => {
