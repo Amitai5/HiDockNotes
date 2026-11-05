@@ -383,6 +383,8 @@ export class JensenDevice {
   // === Continuous read loop (jensen.js: r[], k, y) ===
   private receiveChunks: DataView[] = []
   private readLoopRunning = false
+  private processingData = false
+  private awaitingHandler = false
   // When set, the self-sustaining read loop stops re-issuing transferIn after the
   // current read completes. Lets a graceful teardown drain an in-flight stream and
   // close() WITHOUT a device.reset() — resetting mid-file-list-stream wedges the
@@ -1498,6 +1500,10 @@ export class JensenDevice {
       return
     }
 
+    // Keep at most four unread chunks plus the in-flight read while a browser
+    // storage sink is catching up. Native polling keeps its existing continuous flow.
+    if (this.awaitingHandler || this.receiveChunks.length >= 4) return
+
     // Fallback: WebUSB transferIn loop (browser).
     this.readLoopRunning = true
     this.device.transferIn(2, 51200).then(
@@ -1531,10 +1537,17 @@ export class JensenDevice {
     // froze download/scan progress until the end. Scheduling at most one parse per
     // parseDelay makes it fire on schedule during continuous flow; the carry buffer
     // already handles messages split across parse boundaries.
-    if (!this.decodeTimer) {
+    // Do not wait the normal one-second transfer parse interval once bounded
+    // WebUSB read-ahead fills up; consume it now so a fast disk stays fast.
+    if (this._activeDownloadSettlement && !this.pollEndpoint && this.receiveChunks.length >= 4 && !this.processingData) {
+      if (this.decodeTimer) clearTimeout(this.decodeTimer)
+      this.decodeTimer = null
+      void this.processBufferedData()
+    }
+    if (!this.decodeTimer && !this.processingData && this.receiveChunks.length) {
       this.decodeTimer = setTimeout(() => {
         this.decodeTimer = null
-        this.processBufferedData()
+        void this.processBufferedData()
       }, this.parseDelay)
     }
 
@@ -1548,7 +1561,9 @@ export class JensenDevice {
    * Matches jensen.js N(): push data, restart loop, debounce parse, fire onreceive.
    */
   private onDataReceived(result: USBInTransferResult): void {
-    // Restart read loop immediately (perpetual — matches jensen.js: R() in N()),
+    if (result.data && result.data.byteLength > 0) this.ingestReadChunk(result.data)
+
+    // Restart the read loop when its bounded receive queue has room,
     // unless a graceful teardown asked us to stop. Stopping here (rather than
     // re-issuing) means no transferIn is left pending, so close() succeeds without
     // a device reset.
@@ -1559,123 +1574,139 @@ export class JensenDevice {
       this.startReadLoop()
     }
 
-    if (result.data && result.data.byteLength > 0) {
-      this.ingestReadChunk(result.data)
-    }
   }
 
   /**
    * Parse all buffered data and dispatch to handlers.
    * Matches jensen.js E(): concatenate chunks, parse packets, call handlers.
    */
-  private processBufferedData(): void {
-    // 100KB work buffer (matches jensen.js: new ArrayBuffer(102400))
-    const workBuffer = new Uint8Array(102400)
-    let workLen = 0
-    let decodeError = false
+  private async processBufferedData(): Promise<void> {
+    if (this.processingData) return
+    this.processingData = true
+    const generation = this.sessionGeneration
+    try {
+      // 100KB work buffer (matches jensen.js: new ArrayBuffer(102400))
+      const workBuffer = new Uint8Array(102400)
+      let workLen = 0
+      let decodeError = false
 
-    // Prepend carry bytes from previous call (partial Jensen messages)
-    if (this.carryLen > 0) {
-      workBuffer.set(this.carryBuffer.subarray(0, this.carryLen), 0)
-      workLen = this.carryLen
-      this.carryLen = 0
-    }
-
-    const chunkCount = this.receiveChunks.length
-    for (let qi = 0; qi < chunkCount; qi++) {
-      const chunk = this.receiveChunks.shift()!
-
-      // Copy chunk to flat buffer (jensen.js uses getInt8 — bit pattern preserved in Uint8Array)
-      for (let i = 0; i < chunk.byteLength; i++) {
-        workBuffer[i + workLen] = chunk.getInt8(i)
+      // Prepend carry bytes from previous call (partial Jensen messages)
+      if (this.carryLen > 0) {
+        workBuffer.set(this.carryBuffer.subarray(0, this.carryLen), 0)
+        workLen = this.carryLen
+        this.carryLen = 0
       }
-      workLen += chunk.byteLength
 
-      // Parse all complete messages
-      let consumed = 0
-      for (;;) {
-        let parsed: { message: ResponseMessage; length: number } | null = null
-        try {
-          parsed = this.parsePacket(workBuffer, consumed, workLen)
-        } catch {
-          decodeError = true
-          break
+      const chunkCount = this.receiveChunks.length
+      for (let qi = 0; qi < chunkCount; qi++) {
+        const chunk = this.receiveChunks.shift()!
+
+        // Copy chunk to flat buffer (jensen.js uses getInt8 — bit pattern preserved in Uint8Array)
+        for (let i = 0; i < chunk.byteLength; i++) {
+          workBuffer[i + workLen] = chunk.getInt8(i)
         }
-        if (!parsed) break
+        workLen += chunk.byteLength
 
-        consumed += parsed.length
-        const msg = parsed.message
-
-        if (shouldLog() && msg.id !== CMD.TRANSFER_FILE && msg.id !== CMD.GET_RECORDING_FILE) {
-          console.log(`[Jensen] recv: cmd=${msg.id}, seq=${msg.sequence}, bodyLen=${msg.body.length}`)
-        }
-
-        // Dispatch to handler (jensen.js: s.handlers[S.id](S, g))
-        try {
-          const handler = this.handlers.get(msg.id)
-          if (handler) {
-            const result = handler(msg, this)
-            // If handler returns truthy → resolve promise (jensen.js: A && m(A, S.id))
-            if (result !== undefined && result !== null) {
-              this.triggerResolve(result, msg.id)
-            }
+        // Parse all complete messages
+        let consumed = 0
+        for (;;) {
+          let parsed: { message: ResponseMessage; length: number } | null = null
+          try {
+            parsed = this.parsePacket(workBuffer, consumed, workLen)
+          } catch {
+            decodeError = true
+            break
           }
-        } catch (error) {
-          // Handler threw — matches jensen.js: m(A) with no cmdId
-          this.triggerResolve(error)
-        }
+          if (!parsed) break
 
-        // Try to send next command after each message (matches jensen.js: j() in E loop)
-        this.sendNextCommand()
-      }
+          consumed += parsed.length
+          const msg = parsed.message
 
-      // Decode error recovery (matches jensen.js decode error handling in E())
-      if (decodeError) {
-        if (this.currentCommandTag) {
-          const cmdIdMatch = this.currentCommandTag.match(/^cmd-(\d+)-/)
-          const cmdId = cmdIdMatch ? parseInt(cmdIdMatch[1]) : -1
-          let resolved = false
-          if (cmdId >= 0) {
-            try {
-              const handler = this.handlers.get(cmdId)
-              if (handler) {
-                const partialResult = handler(null, this)
-                // Use partial results if handler returned them (e.g., partially parsed file list)
-                if (partialResult !== undefined && partialResult !== null) {
-                  this.triggerResolve(partialResult, cmdId)
-                  resolved = true
-                }
+          if (shouldLog() && msg.id !== CMD.TRANSFER_FILE && msg.id !== CMD.GET_RECORDING_FILE) {
+            console.log(`[Jensen] recv: cmd=${msg.id}, seq=${msg.sequence}, bodyLen=${msg.body.length}`)
+          }
+
+          // Dispatch to handler (jensen.js: s.handlers[S.id](S, g))
+          try {
+            const handler = this.handlers.get(msg.id)
+            if (handler) {
+              let result = handler(msg, this)
+              if (result instanceof Promise) {
+                this.awaitingHandler = true
+                try { result = await result } finally { this.awaitingHandler = false }
+                if (generation !== this.sessionGeneration) return
               }
-            } catch (error) {
-              this.triggerResolve(error)
-              resolved = true
+              // If handler returns truthy → resolve promise (jensen.js: A && m(A, S.id))
+              if (result !== undefined && result !== null) {
+                this.triggerResolve(result, msg.id)
+              }
             }
+          } catch (error) {
+            // Handler threw — matches jensen.js: m(A) with no cmdId
+            this.triggerResolve(error)
           }
-          if (!resolved) {
-            this.triggerResolve(null, cmdId >= 0 ? cmdId : undefined)
-          }
-          // Unblock the command queue (was missing — caused permanent stall after decode error)
+
+          // Try to send next command after each message (matches jensen.js: j() in E loop)
           this.sendNextCommand()
         }
-        this.receiveChunks.length = 0
-        this.carryLen = 0
-        break
+
+        // Decode error recovery (matches jensen.js decode error handling in E())
+        if (decodeError) {
+          if (this.currentCommandTag) {
+            const cmdIdMatch = this.currentCommandTag.match(/^cmd-(\d+)-/)
+            const cmdId = cmdIdMatch ? parseInt(cmdIdMatch[1]) : -1
+            let resolved = false
+            if (cmdId >= 0) {
+              try {
+                const handler = this.handlers.get(cmdId)
+                if (handler) {
+                  const partialResult = handler(null, this)
+                  // Use partial results if handler returned them (e.g., partially parsed file list)
+                  if (partialResult !== undefined && partialResult !== null) {
+                    this.triggerResolve(partialResult, cmdId)
+                    resolved = true
+                  }
+                }
+              } catch (error) {
+                this.triggerResolve(error)
+                resolved = true
+              }
+            }
+            if (!resolved) {
+              this.triggerResolve(null, cmdId >= 0 ? cmdId : undefined)
+            }
+            // Unblock the command queue (was missing — caused permanent stall after decode error)
+            this.sendNextCommand()
+          }
+          this.receiveChunks.length = 0
+          this.carryLen = 0
+          break
+        }
+
+        // Shift consumed data out of work buffer
+        for (let i = 0; i < workLen - consumed; i++) {
+          workBuffer[i] = workBuffer[i + consumed]
+        }
+        workLen -= consumed
       }
 
-      // Shift consumed data out of work buffer
-      for (let i = 0; i < workLen - consumed; i++) {
-        workBuffer[i] = workBuffer[i + consumed]
+      // Save any remaining unparsed bytes for the next call
+      if (workLen > 0 && !decodeError) {
+        if (this.carryBuffer.length < workLen) {
+          this.carryBuffer = new Uint8Array(workLen * 2)
+        }
+        this.carryBuffer.set(workBuffer.subarray(0, workLen), 0)
+        this.carryLen = workLen
       }
-      workLen -= consumed
-    }
-
-    // Save any remaining unparsed bytes for the next call
-    if (workLen > 0 && !decodeError) {
-      if (this.carryBuffer.length < workLen) {
-        this.carryBuffer = new Uint8Array(workLen * 2)
+    } finally {
+      this.processingData = false
+      if (this.receiveChunks.length && !this.decodeTimer) {
+        this.decodeTimer = setTimeout(() => {
+          this.decodeTimer = null
+          void this.processBufferedData()
+        }, this.parseDelay)
       }
-      this.carryBuffer.set(workBuffer.subarray(0, workLen), 0)
-      this.carryLen = workLen
+      this.startReadLoop()
     }
   }
 
@@ -2411,12 +2442,13 @@ export class JensenDevice {
    * Matches jensen.js streaming()/getFile():
    * - Sets onreceive for real-time byte progress
    * - Registers handler that calls onChunk for each packet
-   * - Handler returns true when received >= fileSize
+   * - Awaits asynchronous storage sinks before dispatching the next packet
+   * - Handler returns true only after the final sink write settles
    */
   async downloadFile(
     filename: string,
     fileSize: number,
-    onChunk: (data: Uint8Array) => void,
+    onChunk: (data: Uint8Array) => void | Promise<void>,
     onProgress?: (received: number) => void,
     signal?: AbortSignal
   ): Promise<boolean> {
@@ -2429,6 +2461,9 @@ export class JensenDevice {
     let received = 0
     let aborted = false
     let settled = false
+    let waitingForSink = false
+    let releaseSink!: () => void
+    const sinkCancelled = new Promise<undefined>(resolve => { releaseSink = () => resolve(undefined) })
 
     // POST-DRAIN settlement (see getActiveDownloadSettlement). Resolved either by the
     // main try/finally on a NON-draining exit (normal completion, null-msg fail), or by
@@ -2512,6 +2547,7 @@ export class JensenDevice {
       if (settled) return
       settled = true
       aborted = true // makes the TRANSFER_FILE handler absorb any late/in-flight packets
+      releaseSink() // let the parser drain even if an OS storage write is still pending
       clearStall()
       this.handlers.set(CMD.TRANSFER_FILE, () => undefined) // no-op absorber
       this.onreceive = null
@@ -2573,7 +2609,7 @@ export class JensenDevice {
     signal?.addEventListener('abort', abortHandler, { once: true })
 
     const armStall = (): void => {
-      if (settled) return
+      if (settled || waitingForSink) return
       if (stallTimerId) clearTimeout(stallTimerId)
       stallTimerId = setTimeout(() => { settleAndFinish('stall') }, TRANSFER_STALL_TIMEOUT_MS)
     }
@@ -2611,22 +2647,46 @@ export class JensenDevice {
 
       // Accumulate data (jensen.js: a += b.body.length, n(b.body))
       received += msg.body.length
-      onChunk(new Uint8Array(msg.body))
+      const finishChunk = (): boolean | undefined => {
+        if (aborted) return undefined
+        armStall()
 
-      // Check if complete (jensen.js: if (h >= t) return "OK"). The device finished
-      // sending, so the bus is already quiet — the normal handler→triggerResolve→
-      // sendNextCommand machinery advances the queue with no drain needed. Mark
-      // settled so a disconnect/stall racing the final packet becomes a no-op.
-      if (received >= fileSize) {
-        if (shouldLog()) console.log(`[Jensen] downloadFile: complete, ${received}/${fileSize}`)
-        settled = true
-        clearStall()
-        signal?.removeEventListener('abort', abortHandler)
-        this.onreceive = null
-        return true
+        // Check if complete (jensen.js: if (h >= t) return "OK"). The device finished
+        // sending, so the bus is already quiet — the normal handler→triggerResolve→
+        // sendNextCommand machinery advances the queue with no drain needed. Mark
+        // settled so a disconnect/stall racing the final packet becomes a no-op.
+        if (received >= fileSize) {
+          if (shouldLog()) console.log(`[Jensen] downloadFile: complete, ${received}/${fileSize}`)
+          settled = true
+          clearStall()
+          signal?.removeEventListener('abort', abortHandler)
+          this.onreceive = null
+          return true
+        }
+
+        return undefined // Keep waiting
       }
-
-      return undefined // Keep waiting
+      try {
+        const write = onChunk(new Uint8Array(msg.body))
+        if (write instanceof Promise) {
+          waitingForSink = true
+          clearStall()
+          return Promise.race([write.then(() => {
+            waitingForSink = false
+            return finishChunk()
+          }, () => {
+            waitingForSink = false
+            settleAndFinish('user-cancel')
+            return undefined
+          }), sinkCancelled]).finally(() => { waitingForSink = false })
+        }
+        return finishChunk()
+      } catch {
+        // A failed sink still owns a streaming command: drain to the byte boundary
+        // before advancing, just as cancellation does. Never send into a live stream.
+        settleAndFinish('user-cancel')
+        return undefined
+      }
     })
 
     // Build command body (jensen.js: filename as char codes)

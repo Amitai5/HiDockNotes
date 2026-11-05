@@ -94,8 +94,50 @@ export class BrowserDevice {
     this.stagedKeys.set(file.name, key)
     if ((await handle.getFile()).size === file.length && await directory.getFileHandle(marker).then(() => true).catch(() => false)) { report(file.length); return handle.getFile() }
     const estimate = await navigator.storage.estimate(); if (estimate.quota && estimate.quota - (estimate.usage ?? 0) < file.length + 8 * 1024 ** 2) throw new Error('This browser needs more temporary storage to sync the recording.')
-    const writable = await handle.createWritable(), signal = this.controller?.signal; let buffered = 0, received = 0, failure: unknown; let writes = Promise.resolve()
-    try { const complete = await this.device.downloadFile(file.name, file.length, chunk => { const copy = chunk.slice(); buffered += copy.byteLength; if (buffered > 8 * 1024 ** 2) { failure = new Error('Browser storage could not keep up. Retry this recording.'); this.controller?.abort(); return }; writes = writes.then(async () => { if (failure) return; await writable.write(copy); buffered -= copy.length }).catch(error => { failure = error; this.controller?.abort() }) }, bytes => { received = bytes; report(bytes) }, signal); await this.device.getActiveDownloadSettlement(); await writes; if (failure) throw failure; if (!complete || received !== file.length) throw new Error('The transfer was interrupted. The original stays on the recorder.'); await writable.close(); const completion = await (await directory.getFileHandle(marker, { create: true })).createWritable(); await completion.close(); return handle.getFile() } catch (error) { await writable.abort().catch(() => undefined); throw error }
+    const writable = await handle.createWritable(), signal = this.controller?.signal
+    // Batch small USB packets, then wait for OPFS before reusing this bounded buffer.
+    // A slow disk must slow the transfer rather than turn a healthy recording into a failure.
+    const buffer = new Uint8Array(256 * 1024)
+    let buffered = 0, received = 0, failure: unknown, write: Promise<void> = Promise.resolve()
+    const flush = async (): Promise<void> => {
+      if (!buffered) return
+      write = writable.write(buffer.subarray(0, buffered))
+      await write
+      buffered = 0
+    }
+    try {
+      const complete = await this.device.downloadFile(file.name, file.length, async chunk => {
+        try {
+          signal?.throwIfAborted()
+          if (received + chunk.length > file.length) throw new Error('The recorder returned more audio than expected. Retry this recording.')
+          let offset = 0
+          while (offset < chunk.length) {
+            const count = Math.min(buffer.length - buffered, chunk.length - offset)
+            buffer.set(chunk.subarray(offset, offset + count), buffered)
+            buffered += count; offset += count
+            if (buffered === buffer.length) { await flush(); signal?.throwIfAborted() }
+          }
+          received += chunk.length
+        } catch (error) { failure = error; this.controller?.abort(); throw error }
+      }, report, signal)
+      await this.device.getActiveDownloadSettlement()
+      await write
+      if (failure) throw failure
+      signal?.throwIfAborted()
+      if (!complete || received !== file.length) throw new Error('The transfer was interrupted. The original stays on the recorder.')
+      await flush()
+      signal?.throwIfAborted()
+      await writable.close()
+      const completion = await (await directory.getFileHandle(marker, { create: true })).createWritable()
+      await completion.close()
+      return handle.getFile()
+    } catch (error) {
+      // Cancellation may settle USB before the in-flight storage write finishes.
+      await this.device.getActiveDownloadSettlement()
+      await write.catch(() => undefined)
+      await writable.abort().catch(() => undefined)
+      throw failure ?? error
+    }
   }
   private async discardStage(name: string): Promise<void> { const key = this.stagedKeys.get(name); if (!key) return; const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('hidock-staging'); await directory.removeEntry(key); await directory.removeEntry(key + '.complete').catch(() => undefined); this.stagedKeys.delete(name) }
   async download(names: string[], automatic = false): Promise<void> {

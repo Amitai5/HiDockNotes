@@ -3,8 +3,9 @@ import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SyncPage } from '../SyncPage'
-import { setAppClient } from '../../services/app-client'
+import { appClient, setAppClient } from '../../services/app-client'
 import { useAppStore } from '../../store/useAppStore'
+import { DEFAULT_AI_SETTINGS } from '../../shared/ai'
 import type { AppClient, DownloadState } from '../../shared/contracts'
 import type { UseDevicePipelineResult } from '../../hooks/useDevicePipeline'
 vi.mock('../../components/BrowserSyncTools',()=>({BrowserSyncTools:()=>null}))
@@ -15,7 +16,7 @@ beforeEach(()=>{
   update.mockReset().mockImplementation(async patch=>({...useAppStore.getState().settings,...patch}));remove.mockReset().mockResolvedValue({result:'success'});download.mockReset().mockResolvedValue(undefined)
   useAppStore.setState({settings:{name:'Owner',autoConnect:false,autoDownload:false,autoDeleteFromDevice:false,appearance:'dark',recordingsPath:'/data'},error:null})
   device={state:{phase:'downloading',device:{model:'hidock-p1',serialNumber:'P1',firmwareVersion:'1.3',storage:null,settings:null,recordingCount:2},scanProgress:null,error:null,downloadProgress:{filename:'new.hda',current:1,total:2,bytesDownloaded:25,totalBytes:100,eta:null}},files:[{name:'new.hda',length:100,time:new Date('2026-10-23'),duration:20,signature:'new',version:1,createDate:'20261023',createTime:'100000'},{name:'saved.hda',length:100,time:new Date('2026-10-22'),duration:20,signature:'saved',version:1,createDate:'20261022',createTime:'100000',localVerified:true}],connect:vi.fn(),disconnect:vi.fn(),sync:vi.fn(),cancel:vi.fn(),deleteFile:remove}
-  setAppClient({settings:{update},devicePipeline:{getDownloads:async()=>({queue:[{filename:'new.hda',status:'downloading',progress:25,fileSize:100}],isProcessing:true,isPaused:false}),onDownloads:callback=>{changed=callback;return()=>undefined},download}} as unknown as AppClient)
+  setAppClient({ai:{getState:vi.fn(async()=>({settings:structuredClone(DEFAULT_AI_SETTINGS),providers:[],ready:true,reason:null})),updateSettings:vi.fn(async patch=>({settings:{...structuredClone(DEFAULT_AI_SETTINGS),...patch},providers:[],ready:true,reason:null}))},library:{onChanged:()=>()=>undefined},settings:{update},devicePipeline:{getDownloads:async()=>({queue:[{filename:'new.hda',status:'downloading',progress:25,fileSize:100}],isProcessing:true,isPaused:false}),onDownloads:callback=>{changed=callback;return()=>undefined},download}} as unknown as AppClient)
 })
 afterEach(cleanup)
 it('shows the transfer bar above the table and updates the row percentage',async()=>{
@@ -27,4 +28,12 @@ it('saves both download and verified-copy deletion preferences without starting 
 })
 it('confirms direct deletion while idle without a download or progress bar',async()=>{
   device.state={...device.state,phase:'idle',downloadProgress:null};render(<SyncPage device={device}/>);fireEvent.click(screen.getByRole('button',{name:'Delete saved.hda from device'}));expect(screen.getByRole('alertdialog')).toHaveTextContent('verified server copy');expect(screen.getByRole('alertdialog')).toHaveTextContent('No audio is downloaded');fireEvent.click(screen.getByRole('button',{name:'Delete from device',exact:true}));await waitFor(()=>expect(remove).toHaveBeenCalledWith('saved.hda',true));expect(download).not.toHaveBeenCalled();expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+})
+
+it('changes automatic transcription independently of downloads and verified deletion', async () => {
+  render(<SyncPage device={device} />)
+  await waitFor(() => expect(screen.getByRole('switch', { name: 'Auto-transcribe on download' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('switch', { name: 'Auto-transcribe on download' }))
+  await waitFor(() => expect(appClient.ai.updateSettings).toHaveBeenCalledWith({ autoTranscribe: false }))
+  expect(download).not.toHaveBeenCalled(); expect(remove).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled()
 })

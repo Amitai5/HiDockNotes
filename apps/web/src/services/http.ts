@@ -10,9 +10,12 @@ export function connectEvents(): () => void {
   return () => { source.close(); if (connection === source) connection = null }
 }
 export function subscribe<T>(channel: string, callback: (value: T) => void): () => void { const listener = (event: Event) => callback((event as CustomEvent<T>).detail); clientEvents.addEventListener(channel, listener); const refresh = () => { if (channel === 'library:changed' || channel === 'calendar:changed') callback(undefined as T) }; clientEvents.addEventListener('reconnected', refresh); return () => { clientEvents.removeEventListener(channel, listener); clientEvents.removeEventListener('reconnected', refresh) } }
+export class HttpError extends Error {
+  constructor(message: string, readonly status: number) { super(message); this.name = 'HttpError' }
+}
 export async function response(path: string, init: RequestInit = {}): Promise<Response> {
   const result = await fetch(path, { ...init, credentials: 'same-origin', headers: { 'X-CSRF-Token': csrf, ...init.headers } })
-  if (!result.ok) { let message = 'The server could not complete this request.'; try { message = (await result.json()).error ?? message } catch { /* Non-JSON proxy errors retain a safe message. */ }; if (result.status === 401) clientEvents.dispatchEvent(new Event('signed-out')); throw new Error(message) }
+  if (!result.ok) { let message = 'The server could not complete this request.'; try { message = (await result.json()).error ?? message } catch { /* Non-JSON proxy errors retain a safe message. */ }; if (result.status === 401) clientEvents.dispatchEvent(new Event('signed-out')); throw new HttpError(message, result.status) }
   return result
 }
 export async function request<T>(path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<T> { return (await response(path, { method, ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) })).json() }

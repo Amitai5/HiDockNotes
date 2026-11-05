@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { uiScale } from '../services/ui-scale'
 
 const MIN_SOURCE = 280
-const DEFAULT_SOURCE = 370
+const DEFAULT_SOURCE = 440
 
 export function AssistantWorkspace({ chat, source }: { chat: ReactNode; source: ReactNode | null }): JSX.Element {
   const root = useRef<HTMLDivElement>(null)
@@ -12,6 +12,8 @@ export function AssistantWorkspace({ chat, source }: { chat: ReactNode; source: 
     const element = root.current
     if (!element || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
+      // Stacked layouts should preserve the user's desktop pane width.
+      if (window.innerWidth <= 800) return
       const max = Math.max(MIN_SOURCE, Math.min(650, element.clientWidth - 350))
       setMaximum(max); setWidth(value => Math.max(MIN_SOURCE, Math.min(max, value)))
     })

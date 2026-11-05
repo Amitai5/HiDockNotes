@@ -1,7 +1,10 @@
 import { labelTranscriptSpeakers } from '../services/transcript-speaker-labels'
 import { appClient } from '../services/app-client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Clock3, FileText, LoaderCircle, Pause, Play, X } from 'lucide-react'
+import { ArrowUpRight, Clock3, FileText, LoaderCircle, Pause, Play, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { recordingUrl } from '../services/note-url'
+import { AudioWaveform } from './AudioWaveform'
 import { NoteSourcePanel } from './NoteSourcePanel'
 import type { RecordingCitation, SourceCitation } from '../shared/ai'
 import type { RecordingDetail } from '../shared/contracts'
@@ -13,6 +16,8 @@ import { useRecordingPlayback } from '../hooks/useRecordingPlayback'
 function RecordingSourcePanel({ citation, onClose }: { citation: RecordingCitation; onClose(): void }): JSX.Element {
   const [detail, setDetail] = useState<RecordingDetail | null>(null)
   const [error, setError] = useState<string | null>(null), [retry, setRetry] = useState(0)
+  const [waveform, setWaveform] = useState<{ peaks: number[]; duration: number } | null>(null)
+  const [waveformUnavailable, setWaveformUnavailable] = useState(false)
   const [tab, setTab] = useState<'transcript' | 'summary'>('transcript')
   const [range, setRange] = useState<{ start: number; end: number } | null>(null)
   const tabs = useRef<HTMLDivElement>(null)
@@ -33,19 +38,24 @@ function RecordingSourcePanel({ citation, onClose }: { citation: RecordingCitati
     const unsubscribe = appClient.library.onChanged(load)
     return () => { mounted = false; unsubscribe() }
   }, [citation.recordingId, citation.start, retry])
+  useEffect(() => {
+    let alive = true
+    if (detail?.recording.hasAudio) void appClient.library.waveform(citation.recordingId).then(value => { if (alive) { setWaveform(value); setWaveformUnavailable(false) } }).catch(() => { if (alive) setWaveformUnavailable(true) })
+    return () => { alive = false }
+  }, [citation.recordingId, detail?.recording.hasAudio, retry])
   const transcriptSegments = useMemo(() => labelTranscriptSpeakers(detail?.segments ?? [], detail?.speakers), [detail?.segments, detail?.speakers])
   const colors = useMemo(() => speakerColors(transcriptSegments.map(segment => segment.speakerName ?? 'Unassigned speech')), [transcriptSegments])
-  const duration = detail?.recording.duration ?? 0
+  const duration = waveform?.duration ?? detail?.recording.duration ?? 0
   const visible = range && detail ? transcriptSegments.slice(range.start, range.end) : []
   const citedId = detail?.segments.find(segment => segment.end > citation.start)?.id ?? detail?.segments.at(-1)?.id
   return <aside className="assistant-source-panel" aria-label="Recording source">
-    <header className="source-panel-heading"><div><small>Source [{citation.number}]</small><h2>{detail?.recording.title || citation.title}</h2></div><Button variant="ghost" aria-label="Close source panel" title="Close source panel" onClick={onClose}><X size={18} /></Button></header>
+    <header className="source-panel-heading"><div><small>Source [{citation.number}] · Recording</small><h2>{detail?.recording.title || citation.title}</h2></div><Button variant="ghost" aria-label="Close source panel" title="Close source panel" onClick={onClose}><X size={18} /></Button></header>
     <div className="source-panel-scroll">
       <section className="source-cited-passage" aria-label="Cited passage"><small><Clock3 size={13} />{formatDuration(citation.start)} · Cited passage</small><p>{citation.excerpt}</p></section>
       {error ? <div className="source-load-error" role="alert"><p>{error}</p><Button onClick={() => { setError(null); setRetry(value => value + 1) }}>Try again</Button></div> : !detail ? <div className="source-loading" role="status"><LoaderCircle className="animate-spin" size={16} />Loading recording…</div> : null}
       {detail && <>
         <p className="source-recorded-at"><time dateTime={detail.recording.recordedAt}>{new Date(detail.recording.recordedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</time> · {formatDuration(duration)}</p>
-        {detail.recording.hasAudio && <div className="source-audio-player"><audio ref={audio} src={`/api/v1/recordings/${citation.recordingId}/audio`} preload="metadata" /><div><Button className="source-play" variant="primary" aria-label={loading ? 'Cancel source playback' : playing ? 'Pause source audio' : 'Play source audio'} onClick={() => { void playPause() }}>{loading ? <LoaderCircle className="animate-spin" size={17} /> : playing ? <Pause size={17} /> : <Play size={17} />}</Button><span>{formatDuration(position)} <small>/ {formatDuration(duration)}</small></span></div><input type="range" aria-label="Seek source recording" min={0} max={duration} step={0.1} value={Math.min(position, duration)} onChange={event => seek(Number(event.target.value))} /></div>}
+        {detail.recording.hasAudio && <div className="source-audio-player"><audio ref={audio} src={`/api/v1/recordings/${citation.recordingId}/audio`} preload="metadata" /><AudioWaveform peaks={waveform?.peaks ?? null} duration={duration} position={position} onSeek={seek} label="Seek source recording" /><div><Button className="source-play" variant="primary" aria-label={loading ? 'Cancel source playback' : playing ? 'Pause source audio' : 'Play source audio'} onClick={() => { void playPause() }}>{loading ? <LoaderCircle className="animate-spin" size={17} /> : playing ? <Pause size={17} /> : <Play size={17} />}</Button><span>{formatDuration(position)} <small>/ {formatDuration(duration)}</small></span></div>{waveformUnavailable && <small className="muted">Waveform unavailable. Playback and seeking are still available.</small>}</div>}
         <div className="source-tabs" role="tablist" aria-label="Recording source content" ref={tabs}>{(['transcript', 'summary'] as const).map((value, index) => <button key={value} id={`source-tab-${value}`} role="tab" aria-selected={tab === value} aria-controls={`source-${value}`} tabIndex={tab === value ? 0 : -1} onClick={() => setTab(value)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1 - index; setTab(next ? 'summary' : 'transcript'); (tabs.current?.children[next] as HTMLButtonElement | undefined)?.focus() } }}>{value === 'transcript' ? 'Transcript' : 'Summary'}</button>)}</div>
         <div role="tabpanel" id="source-transcript" aria-labelledby="source-tab-transcript" hidden={tab !== 'transcript'}>
           {tab === 'transcript' && <>{range && range.start > 0 && <Button className="source-more" variant="ghost" onClick={() => setRange(value => value && { ...value, start: Math.max(0, value.start - 40) })}>Show earlier transcript</Button>}
@@ -54,7 +64,7 @@ function RecordingSourcePanel({ citation, onClose }: { citation: RecordingCitati
         </div>
         <div role="tabpanel" id="source-summary" aria-labelledby="source-tab-summary" hidden={tab !== 'summary'}>{tab === 'summary' && (detail.recording.summary ? <MarkdownContent hideActionItems>{detail.recording.summary}</MarkdownContent> : <p className="source-empty">No summary is available for this recording yet.</p>)}</div>
       </>}
-    </div>
+    </div><footer className="source-panel-footer"><Link className="button button-secondary" to={recordingUrl(citation.recordingId, detail?.recording.projectId ?? null) + '&t=' + citation.start}>Open recording<ArrowUpRight size={14} /></Link></footer>
   </aside>
 }
 

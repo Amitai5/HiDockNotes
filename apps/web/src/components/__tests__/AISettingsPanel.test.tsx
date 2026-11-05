@@ -63,6 +63,7 @@ describe('selected provider setup and processing settings', () => {
   })
   it('saves independent server concurrency limits from the transcription section', async () => {
     render(<AISettingsPanel sections={['transcription']} />)
+    fireEvent.click(await screen.findByText('Advanced · parallel processing'))
     fireEvent.change(await screen.findByLabelText('Simultaneous transcriptions'), { target: { value: '2' } }); fireEvent.change(screen.getByLabelText('Simultaneous summaries'), { target: { value: '4' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save parallelism' }))
     await waitFor(() => expect(updateSettings).toHaveBeenCalledExactlyOnceWith({ maxConcurrentTranscriptions: 2, maxConcurrentSummaries: 4 }))

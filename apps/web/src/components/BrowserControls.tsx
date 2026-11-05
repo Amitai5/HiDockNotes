@@ -5,8 +5,12 @@ import { clientEvents, request } from '../services/http'
 import { reportError } from '../store/useAppStore'
 import { clearOwnerNoteDrafts } from '../services/note-drafts'
 interface InstallPrompt extends Event { prompt(): Promise<void>; userChoice: Promise<{ outcome: string }> }
-export function BrowserControls(): JSX.Element {
+export function BrowserControls({ showSignOut = true }: { showSignOut?: boolean }): JSX.Element {
   const [install, setInstall] = useState<InstallPrompt | null>(null)
   useEffect(() => { const listener = (event: Event) => { event.preventDefault(); setInstall(event as InstallPrompt) }; window.addEventListener('beforeinstallprompt', listener); const before = (event: BeforeUnloadEvent) => { if (browserDevice.busy) { event.preventDefault(); event.returnValue = '' } }; window.addEventListener('beforeunload', before); return () => { window.removeEventListener('beforeinstallprompt', listener); window.removeEventListener('beforeunload', before) } }, [])
-  return <div className="browser-controls">{install && <button onClick={() => { void install.prompt().then(() => install.userChoice).then(() => setInstall(null)) }}><Download size={16} /><span>Install</span></button>}<button title="Sign out" aria-label="Sign out" onClick={() => { void browserDevice.disconnect().catch(reportError).then(() => request('/api/v1/auth/logout', {})).then(async () => { try { await clearOwnerNoteDrafts() } finally { clientEvents.dispatchEvent(new Event('signed-out')) } }).catch(reportError) }}><LogOut size={16} /></button></div>
+  return <div className="browser-controls">{install && <button onClick={() => { void install.prompt().then(() => install.userChoice).then(() => setInstall(null)) }}><Download size={16} /><span>Install</span></button>}{showSignOut && <SignOutButton />}</div>
+}
+
+export function SignOutButton({ name }: { name?: string }): JSX.Element {
+  return <button className={name ? "nav-item account-signout" : undefined} title="Sign out" aria-label="Sign out" onClick={() => { void browserDevice.disconnect().catch(reportError).then(() => request('/api/v1/auth/logout', {})).then(async () => { try { await clearOwnerNoteDrafts() } finally { clientEvents.dispatchEvent(new Event('signed-out')) } }).catch(reportError) }}>{name && <><span className="account-avatar">{name.trim().slice(0, 1).toLocaleUpperCase()}</span><span>{name}</span></>}<LogOut size={16} /></button>
 }

@@ -55,7 +55,7 @@ describe('project Catch me up', () => {
     state.coverage = { ...state.coverage, eligibleMeetings: 20, includedMeetings: 12, staleSummaries: 1 }; state.sourcesChanged = true
     show(); await screen.findByText('Uses the most recent 12 summarized meetings in this period. Older meetings are outside this briefing.')
     expect(screen.getByText(/summary is out of date/)).toBeVisible(); expect(screen.getByText(/meeting sources or project context changed/)).toBeVisible()
-    fireEvent.change(screen.getByRole('combobox', { name: 'Briefing period' }), { target: { value: '7' } })
+    fireEvent.click(within(screen.getByRole('group', { name: 'Briefing period' })).getByRole('button', { name: '7 days' }))
     await waitFor(() => expect(get).toHaveBeenLastCalledWith('team', expect.objectContaining({ days: 7 })))
     expect(generate).not.toHaveBeenCalled()
   })
@@ -73,7 +73,7 @@ describe('project Catch me up', () => {
     cancel.mockImplementationOnce(async () => { reject(Error('Briefing generation cancelled.')) })
     show(); fireEvent.click(await screen.findByRole('button', { name: 'Generate briefing' }))
     expect(screen.getByRole('button', { name: 'Generating…' })).toBeDisabled()
-    expect(screen.getByRole('combobox', { name: 'Briefing period' })).toBeDisabled()
+    for (const button of within(screen.getByRole('group', { name: 'Briefing period' })).getAllByRole('button')) expect(button).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(cancel).toHaveBeenCalledWith('team'))
     expect(await screen.findByRole('alert')).toHaveTextContent('cancelled')

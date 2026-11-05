@@ -3,7 +3,7 @@ import { appClient, setAppClient } from '../../services/app-client'
 import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { Link, MemoryRouter } from 'react-router-dom'
 import { AssistantPage } from '../AssistantPage'
 import { DEFAULT_AI_SETTINGS, type AIState, type AssistantAnswer } from '../../shared/ai'
 import type { ConversationDetail } from '../../shared/conversations'
@@ -15,7 +15,7 @@ beforeEach(() => {
   ask.mockReset().mockResolvedValue({ text: 'The team agreed to send the plan.', citations: [{ number: 1, recordingId: 'source', title: 'Team call', start: 12, excerpt: 'Send the plan.' }] })
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: scroll })
   state = { settings: structuredClone(DEFAULT_AI_SETTINGS), providers: [{ provider: 'gemini', configured: true, verified: true, verifiedAt: null, models: [], offline: false }], ready: true, reason: null }
-  setAppClient({ app: { copyText: vi.fn(async () => undefined) }, ai: { getState: vi.fn(async () => state) }, projects: { list: vi.fn(async () => [{ id: 'project', name: 'Team', count: 2 }]) }, library: { onChanged: vi.fn(() => vi.fn()), detail: vi.fn(async id => ({ recording: { id, filename: 'source.hda', title: id === 'source' ? 'Team call' : 'Client call', recordedAt: '2026-10-13T10:00:00Z', duration: 60, size: 200, status: 'done', verified: true, hasAudio: false, projectId: null, summary: '## Decision\n\nShare the approved plan.' }, segments: Array.from({ length: 30 }, (_, index) => ({ id: 'segment-' + index, start: index * 2, end: index * 2 + 2, text: index === 6 ? 'Send the plan.' : 'Context sentence ' + index, speakerId: null, speakerName: 'Dana' })), actionables: [] } as RecordingDetail)) }, assistant: { ask } } as unknown as AppClient)
+  setAppClient({ app: { copyText: vi.fn(async () => undefined) }, ai: { getState: vi.fn(async () => state) }, projects: { list: vi.fn(async () => [{ id: 'project', name: 'Team', count: 2 }]) }, library: { waveform: vi.fn(async () => ({ peaks: [], duration: 60 })), onChanged: vi.fn(() => vi.fn()), detail: vi.fn(async id => ({ recording: { id, filename: 'source.hda', title: id === 'source' ? 'Team call' : 'Client call', recordedAt: '2026-10-13T10:00:00Z', duration: 60, size: 200, status: 'done', verified: true, hasAudio: false, projectId: null, summary: '## Decision\n\nShare the approved plan.' }, segments: Array.from({ length: 30 }, (_, index) => ({ id: 'segment-' + index, start: index * 2, end: index * 2 + 2, text: index === 6 ? 'Send the plan.' : 'Context sentence ' + index, speakerId: null, speakerName: 'Dana' })), actionables: [] } as RecordingDetail)) }, assistant: { ask } } as unknown as AppClient)
   const chats = new Map<string, ConversationDetail>()
   let selected: string | null = null
   appClient.conversations = {
@@ -41,7 +41,7 @@ beforeEach(() => {
   }
 })
 afterEach(cleanup)
-function show(): ReturnType<typeof render> { return render(<MemoryRouter><AssistantPage /></MemoryRouter>) }
+function show(path = '/assistant'): ReturnType<typeof render> { return render(<MemoryRouter initialEntries={[path]}><AssistantPage /></MemoryRouter>) }
 describe('Assistant conversation and bottom composer', () => {
   it('shows written citations with revision identity and never loads recording playback', async () => {
     ask.mockResolvedValue({ text: 'The note says preparation is complete.', citations: [{kind:'note',number:1,noteId:'written',revision:3,blockId:'block-a',heading:'Preparation',title:'Client brief',projectId:'project',projectName:'Team',excerpt:'Prepared written evidence.'}] })
@@ -235,4 +235,30 @@ describe('Assistant conversation and bottom composer', () => {
     expect(await screen.findByText('The team agreed to send the plan.')).toBeVisible()
     expect(ask).toHaveBeenCalledOnce()
   })
+})
+
+it('opens a recent-chat URL without letting the server current-chat response replace it', async () => {
+  const first = await appClient.conversations.create(null)
+  await appClient.conversations.send(first.conversation.id, 'Earlier saved question', 0)
+  await appClient.conversations.create('project')
+  show('/assistant?chat=' + first.conversation.id)
+  expect(await screen.findByRole('heading', { name: 'Earlier saved question' })).toBeVisible()
+  expect(appClient.conversations.select).toHaveBeenCalledWith(first.conversation.id)
+  expect(screen.getByRole('log', { name: 'Conversation' })).toHaveTextContent('The team agreed')
+  fireEvent.click(screen.getByRole('button', { name: 'New chat', exact: true }))
+  expect(await screen.findByText('What would you like to find?')).toBeVisible()
+  expect(screen.queryByText('Earlier saved question')).toBeNull()
+})
+
+it('reopens All chats after closing it and does not replace the composer draft', async () => {
+  render(<MemoryRouter initialEntries={['/assistant']}><Link to="/assistant?history=1">All chats</Link><AssistantPage /></MemoryRouter>)
+  await waitFor(() => expect(screen.getByLabelText('Ask about your library')).toBeEnabled())
+  fireEvent.change(screen.getByLabelText('Ask about your library'), { target: { value: 'Keep this draft' } })
+  for (let count = 0; count < 2; count++) {
+    fireEvent.click(screen.getByRole('link', { name: 'All chats' }))
+    expect(await screen.findByRole('dialog', { name: 'Saved chats' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Close chat history' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  }
+  expect(screen.getByLabelText('Ask about your library')).toHaveValue('Keep this draft')
 })

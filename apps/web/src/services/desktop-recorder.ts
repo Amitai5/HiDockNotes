@@ -40,7 +40,7 @@ export class DesktopRecorder implements RecorderTransport {
           signal?.throwIfAborted()
           const bytes = new Uint8Array(await this.bridge.call('download:read', [stage.id, offset]))
           if (!bytes.length || bytes.length > 65536 || offset + bytes.length > length) throw new Error('The native recorder returned an incomplete transfer.')
-          chunk(bytes); offset += bytes.length
+          await chunk(bytes); signal?.throwIfAborted(); offset += bytes.length
         }
         signal?.throwIfAborted(); progress?.(length); return true
       } finally { await this.bridge.call('download:finish', [stage.id]).catch(() => undefined) }

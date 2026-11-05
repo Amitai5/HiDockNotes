@@ -74,6 +74,7 @@ describe('recording processing results in the Library', () => {
     appClient.library.setTags = vi.fn(async (_id, tags) => { detail.tags = tags })
     render(<MemoryRouter initialEntries={['/library/recording']}><Routes><Route path="/library/:id" element={<RecordingPage />} /></Routes></MemoryRouter>)
     await screen.findByRole('heading', { name: 'Planning session' })
+    fireEvent.click(screen.getByText('Details', { exact: true }))
     expect(await screen.findByRole('link', { name: 'Planning' })).toHaveAttribute('href', '/library?project=planning')
     expect(screen.getByRole('link', { name: 'Back to Planning' })).toHaveAttribute('href', '/library?project=planning')
     expect(screen.queryByRole('combobox', { name: 'Recording project' })).toBeNull()
@@ -111,6 +112,7 @@ describe('recording processing results in the Library', () => {
     expect(within(transcript).getByText('Unknown speaker 1')).toBeVisible()
     expect(within(transcript).getByText('Unknown speaker 2')).toBeVisible()
     expect(within(transcript).getByText('Unassigned speech')).toBeVisible()
+    fireEvent.click(screen.getByText('Details', { exact: true }))
     const overview = screen.getByLabelText('Recording overview')
     expect(within(overview).getByText('Unknown speaker 1')).toBeVisible()
     expect(within(overview).queryByText('Unassigned speech')).not.toBeInTheDocument()
@@ -121,6 +123,7 @@ describe('recording processing results in the Library', () => {
     detail.recording.status = 'done'
     detail.meeting = { meetingType: 'Project review', participants: [{ speakerId: null, name: 'Dana Lee', organizer: true }, { speakerId: null, name: 'Unknown speaker 2', organizer: false }] }
     render(<MemoryRouter initialEntries={['/library/recording']}><Routes><Route path="/library/:id" element={<RecordingPage />} /></Routes></MemoryRouter>)
+    fireEvent.click(await screen.findByText('Details', { exact: true }))
     const overview = await screen.findByLabelText('Recording overview')
     expect(within(overview).getByText('Project review')).toBeVisible()
     expect(within(overview).getByText('Dana Lee')).toBeVisible()
@@ -184,7 +187,7 @@ describe('recording processing results in the Library', () => {
     expect(newAudio).not.toBe(oldAudio)
     expect(oldAudio.paused).toBe(true)
     expect(oldAudio).not.toHaveAttribute('src')
-    expect(screen.getByRole('slider', { name: 'Seek in recording' })).toHaveAttribute('aria-valuenow', '0')
+    expect(screen.getByRole('slider', { name: 'Seek in recording' })).toHaveValue('0')
     expect(screen.getByLabelText('Playback speed')).toHaveValue('1')
     fireEvent.playing(oldAudio); fireEvent.timeUpdate(oldAudio)
     expect(screen.getByRole('button', { name: 'Play audio' })).toBeVisible()
@@ -192,7 +195,7 @@ describe('recording processing results in the Library', () => {
     await screen.findByRole('button', { name: 'Pause audio' })
     expect(play).toHaveBeenCalledTimes(2)
     newAudio.currentTime = 2; fireEvent.timeUpdate(newAudio)
-    expect(screen.getByRole('slider', { name: 'Seek in recording' })).toHaveAttribute('aria-valuenow', '2')
+    expect(screen.getByRole('slider', { name: 'Seek in recording' })).toHaveValue('2')
   })
   it('ignores a previous recording\'s late play failure after switching while buffering', async () => {
     detail.recording.hasAudio = true; useAppStore.setState({ error: null })
@@ -208,4 +211,19 @@ describe('recording processing results in the Library', () => {
     expect(useAppStore.getState().error).toBeNull()
     expect(screen.getByRole('button', { name: 'Play audio' })).toBeVisible()
   })
+  it('finds transcript words without altering the saved transcript or processing the recording', async () => {
+    detail.recording.status = 'done'
+    detail.segments = [{ id: 'a', start: 1, end: 2, text: 'Approved the pilot.', speakerId: null, speakerName: 'Dana' }, { id: 'b', start: 3, end: 4, text: 'Discussed the help guide.', speakerId: null, speakerName: 'Sam' }]
+    render(<MemoryRouter initialEntries={['/library/recording']}><Routes><Route path="/library/:id" element={<RecordingPage />} /></Routes></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Search transcript' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Find in transcript' }), { target: { value: 'pilot' } })
+    expect(screen.getByText('Approved the pilot.')).toBeVisible()
+    expect(screen.queryByText('Discussed the help guide.')).toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Find in transcript' }), { target: { value: 'absent words' } })
+    expect(screen.getByRole('status')).toHaveTextContent('No matching transcript excerpts.')
+    fireEvent.click(screen.getByRole('button', { name: 'Search transcript' }))
+    expect(screen.getByText('Discussed the help guide.')).toBeVisible()
+    expect(detail.segments).toHaveLength(2); expect(appClient.ai.reprocess).not.toHaveBeenCalled()
+  })
+
 })

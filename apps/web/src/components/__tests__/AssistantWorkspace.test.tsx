@@ -11,7 +11,7 @@ describe('Assistant source workspace', () => {
     const view = render(<AssistantWorkspace chat={chat} source={<aside>Source</aside>} />)
     const input = screen.getByLabelText('Draft'), separator = screen.getByRole('separator', { name: 'Resize source panel' })
     fireEvent.keyDown(separator, { key: 'ArrowLeft' })
-    expect(separator).toHaveAttribute('aria-valuenow', '390')
+    expect(separator).toHaveAttribute('aria-valuenow', '460')
     fireEvent.keyDown(separator, { key: 'Home' })
     expect(separator).toHaveAttribute('aria-valuenow', '280')
     fireEvent.keyDown(separator, { key: 'End' })

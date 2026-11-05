@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest'
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MarkdownContent } from '../MarkdownContent'
 
 afterEach(cleanup)
@@ -31,4 +31,23 @@ describe('formatted recording summaries', () => {
     view.rerender(<MarkdownContent>{summary}</MarkdownContent>)
     expect(screen.getByText('Send the plan')).toBeVisible()
   })
+})
+
+it('opens only saved source numbers inline and keeps code and unknown numbers literal', () => {
+  const open = vi.fn(), citation = { number: 1, recordingId: '67b1d399-2d73-48ab-bfee-8a6c91bd0c80', start: 12, title: 'Planning', excerpt: 'Approved the pilot.' }
+  render(<MarkdownContent citations={[citation]} onCitation={open}>{'The pilot was approved [1]. Unverified [99]. Code: \u0060[1]\u0060'}</MarkdownContent>)
+  const source = screen.getByRole('link', { name: 'Review source 1: Planning' })
+  expect(source).toHaveAttribute('href', window.location.origin + '/#/library/67b1d399-2d73-48ab-bfee-8a6c91bd0c80?t=12')
+  fireEvent.click(source)
+  expect(open).toHaveBeenCalledExactlyOnceWith(citation, source)
+  expect(screen.getAllByRole('link')).toHaveLength(1)
+  expect(screen.getByText('[1]', { selector: 'code' })).toBeVisible()
+  expect(screen.getByText(/Unverified/)).toHaveTextContent('[99]')
+})
+
+it('keeps an answer readable when old citation metadata cannot form a valid app link', () => {
+  const open = vi.fn()
+  render(<MarkdownContent citations={[{ number: 1, recordingId: 'malformed-id', start: -1, title: 'Old source', excerpt: 'Saved evidence' }]} onCitation={open}>{'Saved words [1].'}</MarkdownContent>)
+  expect(screen.getByText('Saved words [1].')).toBeVisible()
+  expect(screen.queryByRole('link')).toBeNull(); expect(open).not.toHaveBeenCalled()
 })

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { uiScale } from '../services/ui-scale'
 
-const MIN_NAVIGATION = 200
-const DEFAULT_NAVIGATION = 256
+const MIN_NAVIGATION = 180
+const DEFAULT_NAVIGATION = 212
 export function ResizableNavigation({ children }: { children: ReactNode }): JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const drag = useRef<{ x: number; width: number } | null>(null)
@@ -13,6 +13,8 @@ export function ResizableNavigation({ children }: { children: ReactNode }): JSX.
     const element = root.current
     if (!element || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
+      // Stacked layouts should preserve the user's desktop pane width.
+      if (element.clientWidth <= 800) return
       // Leave enough room for the summary and the audio/transcript panel.
       const max = Math.max(MIN_NAVIGATION, Math.min(440, Math.floor(element.clientWidth - 650)))
       setMaximum(max); setWidth(value => Math.min(max, Math.max(MIN_NAVIGATION, value)))

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, Menu, RotateCcw, Sparkles, Trash2 } from 'lucide-react'
+import { Download, MoreHorizontal, RotateCcw, Sparkles, Trash2 } from 'lucide-react'
 import type { RecordingView } from '../shared/contracts'
 import type { RecordingReprocessMode } from '../shared/meeting'
 import { RecordingDelete } from './RecordingDelete'
@@ -8,7 +8,7 @@ import { RecordingExport } from './RecordingExport'
 import { RecordingReprocess } from './RecordingReprocess'
 import { uiScale } from '../services/ui-scale'
 
-export function RecordingActions({ expectedSpeakers, recording, canSummarize, canTranscribe, canProcess, processReady, retry, busy, onProcess, onQueued, onDeleting, onDeleted }: { expectedSpeakers?: number | null; recording: RecordingView; canSummarize: boolean; canTranscribe: boolean; canProcess: boolean; processReady: boolean; retry: boolean; busy: boolean; onProcess(): void; onQueued(): void; onDeleting?(value: boolean): void; onDeleted?(): void }): JSX.Element {
+export function RecordingActions({ showExport = false, expectedSpeakers, recording, canSummarize, canTranscribe, canProcess, processReady, retry, busy, onProcess, onQueued, onDeleting, onDeleted }: { showExport?: boolean; expectedSpeakers?: number | null; recording: RecordingView; canSummarize: boolean; canTranscribe: boolean; canProcess: boolean; processReady: boolean; retry: boolean; busy: boolean; onProcess(): void; onQueued(): void; onDeleting?(value: boolean): void; onDeleted?(): void }): JSX.Element {
   const [open, setOpen] = useState(false)
   const [action, setAction] = useState<RecordingReprocessMode | 'export' | 'delete' | null>(null)
   const [position, setPosition] = useState({ left: 0, top: 0 })
@@ -63,7 +63,8 @@ export function RecordingActions({ expectedSpeakers, recording, canSummarize, ca
     { label: 'Delete recording', icon: <Trash2 size={16} />, disabled: false, select: () => setAction('delete') }
   ]
   return <div className="recording-actions-toolbar">
-    <button ref={trigger} type="button" aria-label="Recording actions" title="Recording actions" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} className="button button-secondary recording-actions-trigger" onClick={() => { if (open) { setOpen(false); restoreFocus() } else showMenu() }} onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); showMenu(event.key === 'ArrowUp') } }}><Menu size={19} /></button>
+    {showExport && <button type="button" className="button button-secondary" onClick={() => setAction('export')}><Download size={14} />Export</button>}
+    <button ref={trigger} type="button" aria-label="Recording actions" title="Recording actions" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} className="button button-secondary recording-actions-trigger" onClick={() => { if (open) { setOpen(false); restoreFocus() } else showMenu() }} onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); showMenu(event.key === 'ArrowUp') } }}><MoreHorizontal size={18} /></button>
     {open && createPortal(<div ref={menu} id={id} className="recording-actions-menu" role="menu" aria-label="Recording actions" style={position} onKeyDown={event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); restoreFocus(); return }
       // Restore the anchor before the browser's default Tab action so focus

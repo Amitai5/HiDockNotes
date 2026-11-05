@@ -16,7 +16,7 @@ vi.mock('@hidock/jensen-protocol', () => ({ USB_VENDOR_IDS: [0x10d6,0x3887], sup
   getBatteryStatus = async () => null
   getRecordingFile = async () => ({recording:fake.active})
   listFiles = vi.fn(async () => fake.files.map(file => ({ ...file })))
-  downloadFile = vi.fn(async (_name, length, chunk, progress, signal) => { signal?.throwIfAborted(); chunk(new Uint8Array(length)); progress(25); progress(75); progress(length); return true })
+  downloadFile = vi.fn(async (_name, length, chunk, progress, signal) => { signal?.throwIfAborted(); await chunk(new Uint8Array(length)); progress(25); progress(75); progress(length); return true })
   getActiveDownloadSettlement = vi.fn(async () => undefined)
   disconnect = vi.fn(async () => { this.connected=false })
   deleteFile = vi.fn(async () => ({result:'success'}))
@@ -94,4 +94,56 @@ it('never auto-deletes after an upload failure and keeps the device copy after f
 })
 it('reports storage failures as failures rather than deliberate cancellation',async()=>{
   const client=new BrowserDevice();await client.connect();storage.getFileHandle=async()=>({getFile:async()=>new NodeBlob([]),createWritable:async()=>({write:async()=>{throw Error('Storage is full')},close:async()=>undefined,abort:async()=>undefined})}) as any;await expect(client.download(['meeting.hda'])).rejects.toThrow('Storage is full');expect((await client.api.getDownloads()).queue[0].status).toBe('failed');await client.disconnect()
+})
+
+it('copies a recording larger than the old 8 MiB queue limit with bounded writes and storage backpressure', async () => {
+  fake.files[0].length = 10 * 1024 * 1024 + 17
+  const client = new BrowserDevice(); await client.connect()
+  let release!: () => void, started!: () => void, received = 0
+  const blocked = new Promise<void>(resolve => { release = resolve }), writing = new Promise<void>(resolve => { started = resolve }), sizes: number[] = []
+  const original = FileHandle.prototype.createWritable
+  const spy = vi.spyOn(FileHandle.prototype, 'createWritable').mockImplementation(async function (this: FileHandle) {
+    const writable = await original.call(this)
+    return { ...writable, write: async bytes => { sizes.push(bytes.length); if (sizes.length === 1) { started(); await blocked }; await writable.write(bytes) } }
+  })
+  fake.devices.at(-1).downloadFile.mockImplementationOnce(async (_name, length, chunk, progress) => {
+    while (received < length) { const bytes = new Uint8Array(Math.min(65536, length - received)).fill(37); received += bytes.length; await chunk(bytes); progress(received) }
+    return true
+  })
+  try {
+    const task = client.download(['meeting.hda'])
+    await writing
+    expect(received).toBe(256 * 1024); expect(fake.upload).not.toHaveBeenCalled()
+    release(); await task
+    expect(sizes.every(size => size <= 256 * 1024)).toBe(true)
+    expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(fake.files[0].length)
+    const audio = fake.upload.mock.calls[0][0] as Blob
+    expect(audio.size).toBe(fake.files[0].length)
+    expect(new Uint8Array(await audio.arrayBuffer()).every(byte => byte === 37)).toBe(true)
+    expect((await client.api.getDownloads()).queue[0].status).toBe('completed')
+    expect(fake.devices.at(-1).deleteFile).not.toHaveBeenCalled()
+  } finally { release(); spy.mockRestore(); await client.disconnect() }
+})
+
+it('waits for an in-flight storage write on cancel and never uploads, marks complete or deletes its partial copy', async () => {
+  fake.files[0].length = 512 * 1024
+  const client = new BrowserDevice(); await client.connect()
+  let release!: () => void, started!: () => void, aborted = false
+  const blocked = new Promise<void>(resolve => { release = resolve }), writing = new Promise<void>(resolve => { started = resolve })
+  const original = FileHandle.prototype.createWritable
+  const spy = vi.spyOn(FileHandle.prototype, 'createWritable').mockImplementation(async function (this: FileHandle) {
+    const writable = await original.call(this)
+    return { ...writable, write: async bytes => { started(); await blocked; await writable.write(bytes) }, abort: async () => { aborted = true; await writable.abort() } }
+  })
+  try {
+    const task = client.download(['meeting.hda'])
+    await writing
+    const cancelled = client.cancel(); await Promise.resolve()
+    expect(aborted).toBe(false)
+    release(); await cancelled; await task
+    expect(aborted).toBe(true)
+    expect([...storage.entries.keys()].some(key => key.endsWith('.complete'))).toBe(false)
+    expect(fake.upload).not.toHaveBeenCalled(); expect(fake.devices.at(-1).deleteFile).not.toHaveBeenCalled()
+    expect((await client.api.getDownloads()).queue[0].status).toBe('cancelled')
+  } finally { release(); spy.mockRestore(); await client.disconnect() }
 })

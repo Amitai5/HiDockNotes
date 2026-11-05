@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './styles.css'
 import './notes.css'
+import './redesign.css'
 import { AuthGate } from './components/AuthGate'
 import { initializePwa } from './components/WebUpdatesPanel'
 

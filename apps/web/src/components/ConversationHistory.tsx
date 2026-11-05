@@ -5,10 +5,11 @@ import { History, MessageSquare, Pencil, Search, Trash2, X } from 'lucide-react'
 import type { ConversationDetail, ConversationView } from '../shared/conversations'
 import { Button } from './ui'
 
-export function ConversationHistory({ selected, onSelect, onSaved, onDeleted }: { selected: string | null; onSelect(id: string): void; onSaved(detail: ConversationDetail): void; onDeleted(id: string): void }): JSX.Element {
+export function ConversationHistory({ openRequest = 0, selected, onSelect, onSaved, onDeleted }: { openRequest?: number; selected: string | null; onSelect(id: string): void; onSaved(detail: ConversationDetail): void; onDeleted(id: string): void }): JSX.Element {
   const [open, setOpen] = useState(false), [query, setQuery] = useState(''), [items, setItems] = useState<ConversationView[]>([])
   const [target, setTarget] = useState<ConversationView | null>(null), [mode, setMode] = useState<'list' | 'rename' | 'delete'>('list')
   const [title, setTitle] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false), [loading, setLoading] = useState(false), [revision, setRevision] = useState(0)
+  useEffect(() => { if (openRequest) { setOpen(true); setMode('list'); setError('') } }, [openRequest])
   useEffect(() => appClient.conversations.onChanged(() => setRevision(value => value + 1)), [])
   useEffect(() => {
     if (!open) return

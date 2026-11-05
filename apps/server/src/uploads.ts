@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify'
 import { hashFile, hasVerifiedCopy } from '@hidock/core/services/file-verification'
 import { queryAll, queryOne, run, runInTransaction, markRecordingDownloaded, markRecordingVerified, remeasureRecordingDuration } from '@hidock/core/services/database'
 interface Upload { id: string; filename: string; size: number; offset: number; checksum: string; serial: string | null; device_filename: string | null; recorded_at: string; state: string; recording_id: string | null; project_id: string | null; request_id: string | null }
-const CHUNK = 1024 * 1024
+const CHUNK = 4 * 1024 * 1024
 export async function registerUploads(app: FastifyInstance, dataPath: string, ready: (id: string) => void): Promise<void> {
   const folder = join(dataPath, 'uploads'), recordings = join(dataPath, 'recordings'); await mkdir(folder, { recursive: true }); await mkdir(recordings, { recursive: true })
   const busy = new Set<string>()
