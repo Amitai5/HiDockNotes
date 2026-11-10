@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createHashRouter, RouterProvider, Navigate, Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Activity, BookOpen, MessageSquare, Menu, Search, Settings, RefreshCw, X } from 'lucide-react'
+import { Activity, BookOpen, MessageSquare, Search, Settings, RefreshCw, X } from 'lucide-react'
 import product from '../product.json'
 import { useDevicePipeline } from './hooks/useDevicePipeline'
 import { useDeviceSubscriptions } from './hooks/useDeviceSubscriptions'
@@ -15,7 +15,8 @@ import { SettingsPage } from './pages/SettingsPage'
 import { AssistantPage } from './pages/AssistantPage'
 import { ResizableNavigation } from './components/ResizableNavigation'
 import { BrandMark } from './components/BrandMark'
-import { CreateProjectFolder } from './components/CreateProjectFolder'
+import { MobileNavigation } from './components/MobileNavigation'
+import { useVisualViewport } from './hooks/useVisualViewport'
 import { BrowserControls, SignOutButton } from './components/BrowserControls'
 import { RecentChatsSidebar } from './components/RecentChatsSidebar'
 import { WebUpdateNotice } from './components/WebUpdatesPanel'
@@ -27,6 +28,7 @@ const primary = [
 ]
 
 function Shell(): JSX.Element {
+  useVisualViewport()
   const device = useDevicePipeline()
   useDeviceSubscriptions()
   const settings = useAppStore(s => s.settings), search = useAppStore(s => s.search)
@@ -65,7 +67,7 @@ function Shell(): JSX.Element {
   return <ResizableNavigation>
     <header className="titlebar">
       <Link className="brand" to="/library" aria-label="HiDockNotes Library"><BrandMark /><span>{product.name}</span></Link>
-      <details className="mobile-navigation"><summary aria-label="Open navigation"><Menu size={19} /></summary><nav aria-label="Mobile navigation">{[...primary, { label: 'Settings', path: '/settings', Icon: Settings }].map(({ label, path, Icon }) => <Link key={path} to={path} onClick={event => event.currentTarget.closest('details')?.removeAttribute('open')}><Icon size={16} />{label}</Link>)}<CreateProjectFolder /></nav></details>
+      <MobileNavigation items={primary} name={settings?.name} />
       <form className="global-search input-with-icon" onSubmit={event => { event.preventDefault(); navigate('/library') }}><Search size={16} /><input ref={searchInput} aria-label="Search your library" placeholder="Search your library" value={search} onChange={event => { setSearch(event.target.value); if (event.target.value) navigate('/library') }} /><kbd>Ctrl K</kbd></form>
       <div className="titlebar-actions">{connected && <Link to="/sync" className="device-chip connected"><span />{modelName(device.state.device?.model)} · {device.state.phase === 'idle' ? 'Ready' : device.state.downloadProgress ? `Syncing ${device.state.downloadProgress.current} of ${device.state.downloadProgress.total}` : device.state.phase}</Link>}<button className="activity-trigger" aria-label={jobs ? `Activity, ${jobs} jobs running` : 'Activity'} title="Activity" onClick={() => setActivityOpen(true)}><Activity size={17} className={active || jobs ? 'pulse-accent' : ''} />{jobs > 0 && <span className="activity-count">{jobs}</span>}</button><BrowserControls showSignOut={false} /></div>
     </header>

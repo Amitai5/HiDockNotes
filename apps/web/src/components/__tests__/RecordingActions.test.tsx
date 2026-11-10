@@ -9,13 +9,13 @@ const recording: RecordingView = { id: 'recording', filename: 'call.hda', title:
 afterEach(cleanup)
 function show(canSummarize = true, canTranscribe = true) { return render(<RecordingActions recording={recording} canSummarize={canSummarize} canTranscribe={canTranscribe} canProcess={false} processReady retry={false} busy={false} onProcess={vi.fn()} onQueued={vi.fn()} />) }
 describe('hamburger recording actions', () => {
-  it('opens the three actions in a body portal, supports arrow keys and restores focus on Escape', () => {
+  it('opens the recording actions in a body portal, supports arrow keys and restores focus on Escape', () => {
     const view = show(), trigger = screen.getByRole('button', { name: 'Recording actions' })
     expect(screen.queryByRole('menu')).toBeNull()
     fireEvent.keyDown(trigger, { key: 'ArrowDown' })
     const menu = screen.getByRole('menu')
     expect(view.container).not.toContainElement(menu)
-    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Resummarize', 'Retranscribe', 'Export', 'Delete recording'])
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Resummarize', 'Retranscribe', 'Export', 'Move to project', 'Delete recording'])
     expect(screen.getByRole('menuitem', { name: 'Resummarize' })).toHaveFocus()
     fireEvent.keyDown(menu, { key: 'ArrowDown' })
     expect(screen.getByRole('menuitem', { name: 'Retranscribe' })).toHaveFocus()

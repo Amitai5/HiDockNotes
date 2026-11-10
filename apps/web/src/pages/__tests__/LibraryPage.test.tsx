@@ -124,3 +124,18 @@ it('filters the current project without changing the global library search', asy
   expect(content).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'Research', scope: { kind: 'project', projectId: 'team' } }))
   expect(useAppStore.getState().search).toBe('')
 })
+
+it('keeps the move dialog stable and focuses the project heading after the last recording leaves', async () => {
+  rows = rows.filter(row => row.kind === 'recording')
+  appClient.projects.list = vi.fn(async () => projects)
+  appClient.projects.assign = vi.fn(async id => { rows = rows.filter(row => row.id !== id); changed.forEach(callback => callback()) })
+  show('/library?project=team')
+  fireEvent.click(await screen.findByRole('button', { name: 'Move Project call to project' }))
+  fireEvent.click(await screen.findByRole('radio', { name: 'Empty project' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Move recording', exact: true }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(await screen.findByText('No items yet. Write a note or add audio.')).toBeVisible()
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Team', level: 1 })).toHaveFocus())
+  expect(screen.getByRole('status')).toHaveTextContent('Moved to Empty project.')
+  expect(appClient.projects.assign).toHaveBeenCalledExactlyOnceWith('call', 'empty')
+})

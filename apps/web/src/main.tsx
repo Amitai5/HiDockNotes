@@ -4,6 +4,7 @@ import App from './App'
 import './styles.css'
 import './notes.css'
 import './redesign.css'
+import './mobile.css'
 import { AuthGate } from './components/AuthGate'
 import { initializePwa } from './components/WebUpdatesPanel'
 
