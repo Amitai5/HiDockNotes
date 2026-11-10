@@ -94,3 +94,12 @@ describe('written-note save sessions', () => {
     expect(f.api.create.mock.calls[0]).toEqual(f.api.create.mock.calls[1]); expect(session.getSnapshot().draft.title).toBe('Newer changes stay here'); expect(session.dirty).toBe(true)
   })
 })
+
+it('keeps the latest acknowledged note when an older background read resolves after its save', async () => {
+  const f = fixture(), session = f.make(), older = structuredClone(f.current()), gate = deferred<WrittenNote>()
+  f.api.get.mockImplementationOnce(() => gate.promise)
+  const reading = session.refresh()
+  session.edit({ title: 'Latest acknowledged title' }); await session.flush()
+  gate.resolve(older); await reading
+  expect(session.getSnapshot()).toMatchObject({ status: 'saved', note: { revision: 2 }, draft: { title: 'Latest acknowledged title' } })
+})

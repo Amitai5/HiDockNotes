@@ -3,6 +3,7 @@ import { appClient, setAppClient } from '../../services/app-client'
 import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { Link, MemoryRouter } from 'react-router-dom'
 import { AssistantPage } from '../AssistantPage'
 import { DEFAULT_AI_SETTINGS, type AIState, type AssistantAnswer } from '../../shared/ai'
@@ -261,4 +262,49 @@ it('reopens All chats after closing it and does not replace the composer draft',
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   }
   expect(screen.getByLabelText('Ask about your library')).toHaveValue('Keep this draft')
+})
+
+it('finishes opening a saved chat when a library refresh arrives before selection resolves', async () => {
+  const chat = await appClient.conversations.create('project')
+  chat.conversation.title = 'Saved project chat'; chat.conversation.draft = 'My saved question'
+  let selected!: (value: ConversationDetail) => void
+  vi.mocked(appClient.conversations.select).mockImplementationOnce(() => new Promise(resolve => { selected = resolve }))
+  vi.mocked(appClient.conversations.get).mockResolvedValue(chat)
+  show('/assistant?chat=' + chat.conversation.id)
+  await waitFor(() => expect(appClient.conversations.select).toHaveBeenCalledWith(chat.conversation.id))
+  const changed = vi.mocked(appClient.library.onChanged).mock.calls[0][0]
+  await act(async () => { changed(); await Promise.resolve(); selected(chat) })
+  await waitFor(() => expect(screen.getByLabelText('Ask about your library')).toBeEnabled())
+  expect(screen.queryByText('Opening chat…')).toBeNull()
+  expect(screen.getByLabelText('Ask about your library')).toHaveValue('My saved question')
+  expect(screen.getByLabelText('Assistant project')).toHaveValue('project')
+})
+
+it('does not replace a newly saved answer with an older background chat snapshot', async () => {
+  const older = await appClient.conversations.create(null)
+  let refresh!: (value: ConversationDetail) => void
+  vi.mocked(appClient.conversations.get).mockImplementationOnce(() => new Promise(resolve => { refresh = resolve }))
+  show(); await waitFor(() => expect(screen.getByLabelText('Ask about your library')).toBeEnabled())
+  await act(async () => { vi.mocked(appClient.library.onChanged).mock.calls[0][0](); await Promise.resolve() })
+  fireEvent.change(screen.getByLabelText('Ask about your library'), { target: { value: 'Keep this saved answer' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }))
+  await screen.findByText('The team agreed to send the plan.')
+  await act(async () => { refresh(older) })
+  expect(screen.getByText('The team agreed to send the plan.')).toBeVisible()
+})
+
+it('opens the current chat after React remounts its subscription effects', async () => {
+  await appClient.conversations.create(null)
+  render(<StrictMode><MemoryRouter initialEntries={['/assistant']}><AssistantPage /></MemoryRouter></StrictMode>)
+  await waitFor(() => expect(screen.getByLabelText('Ask about your library')).toBeEnabled())
+  expect(screen.queryByText('Opening chat…')).toBeNull()
+})
+
+it('refreshes a routed chat after React replays its subscription effects', async () => {
+  const chat = await appClient.conversations.create(null)
+  render(<StrictMode><MemoryRouter initialEntries={['/assistant?chat=' + chat.conversation.id]}><AssistantPage /></MemoryRouter></StrictMode>)
+  await waitFor(() => expect(screen.getByLabelText('Ask about your library')).toBeEnabled())
+  await appClient.conversations.rename(chat.conversation.id, 'Renamed from another window', 0)
+  await act(async () => { vi.mocked(appClient.conversations.onChanged).mock.calls.at(-1)![0](chat.conversation.id) })
+  expect(await screen.findByRole('heading', { name: 'Renamed from another window' })).toBeVisible()
 })

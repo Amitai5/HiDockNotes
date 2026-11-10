@@ -26,21 +26,28 @@ export function AssistantPage(): JSX.Element {
   const [pending, setPending] = useState<{ id: string; text: string } | null>(null), [source, setSource] = useState<SourceCitation | null>(null)
   const selected = useRef<string | null>(null), revision = useRef(0), drafts = useRef(new Map<string, string>()), cancelled = useRef(new Set<string>())
   const sourceTrigger = useRef<HTMLElement | null>(null), composer = useRef<HTMLTextAreaElement>(null), end = useRef<HTMLDivElement>(null)
+  const mountedRef = useRef(false), opening = useRef<number | null>(null), refreshPending = useRef<string | null>(null), refreshRevision = useRef(0)
+  const refreshChat = useCallback((id: string): void => {
+    if (selected.current !== id) return
+    if (opening.current !== null) { refreshPending.current = id; return }
+    const navigation = revision.current, request = ++refreshRevision.current
+    void appClient.conversations.get(id).then(value => {
+      if (!mountedRef.current || selected.current !== id || navigation !== revision.current || request !== refreshRevision.current) return
+      setDetail(current => current?.conversation.id === id && current.conversation.version > value.conversation.version ? current : value)
+    }).catch(error => { if (mountedRef.current && selected.current === id && navigation === revision.current) reportError(error) })
+  }, [])
   useEffect(() => {
     let mounted = true
+    mountedRef.current = true
+    const initialRequest = revision.current
     const refreshAI = (): void => { void appClient.ai.getState().then(value => { if (mounted) setState(value) }).catch(reportError) }
     refreshAI()
     void appClient.projects.list().then(value => { if (mounted) setProjects(value) }).catch(reportError)
-    void appClient.conversations.current().then(value => { if (mounted && revision.current === 0) { selected.current = value?.conversation.id ?? null; setDetail(value); setProject(value?.conversation.projectId ?? ''); setQuestion(value?.conversation.responding ? '' : value?.conversation.draft ?? '') } }).catch(reportError).finally(() => { if (mounted && revision.current === 0) setLoading(false) })
-    const refreshChat = (id: string): void => {
-      if (selected.current !== id) return
-      const request = ++revision.current
-      void appClient.conversations.get(id).then(value => { if (mounted && selected.current === id && request === revision.current) setDetail(value) }).catch(reportError)
-    }
+    void appClient.conversations.current().then(value => { if (mounted && revision.current === initialRequest) { selected.current = value?.conversation.id ?? null; setDetail(value); setProject(value?.conversation.projectId ?? ''); setQuestion(value?.conversation.responding ? '' : value?.conversation.draft ?? '') } }).catch(reportError).finally(() => { if (mounted && revision.current === initialRequest) setLoading(false) })
     const offAI = appClient.library.onChanged(() => { refreshAI(); if (selected.current) refreshChat(selected.current) })
     const offChat = appClient.conversations.onChanged(refreshChat)
-    return () => { mounted = false; ++revision.current; offAI(); offChat() }
-  }, [])
+    return () => { mounted = false; mountedRef.current = false; opening.current = null; refreshPending.current = null; routeRequest.current = ''; ++revision.current; ++refreshRevision.current; offAI(); offChat() }
+  }, [refreshChat])
   useEffect(() => { const conversation = end.current?.parentElement; conversation?.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' }) }, [detail?.messages.at(-1)?.id, pending])
   useEffect(() => { const textarea = composer.current; if (textarea) { textarea.style.height = 'auto'; textarea.style.height = `${Math.max(68, Math.min(180, textarea.scrollHeight))}px` } }, [question])
   const usingPlan = state?.settings.chat.provider === 'chatgpt'
@@ -49,16 +56,23 @@ export function AssistantPage(): JSX.Element {
   const draftKey = detail?.conversation.id ?? `new:${project}`
   function changeQuestion(value: string): void { setQuestion(value); drafts.current.set(draftKey, value) }
   const newChat = useCallback((nextProject = project): void => {
-    ++revision.current; selected.current = null; setDetail(null); setSource(null); setProject(nextProject); setLoading(false); setQuestion(drafts.current.get(`new:${nextProject}`) ?? '')
+    ++revision.current; opening.current = null; refreshPending.current = null; selected.current = null; setDetail(null); setSource(null); setProject(nextProject); setLoading(false); setQuestion(drafts.current.get(`new:${nextProject}`) ?? '')
   }, [project])
   const selectChat = useCallback(async (id: string): Promise<void> => {
     const request = ++revision.current
+    opening.current = request; refreshPending.current = null
     selected.current = id; setSource(null); setLoading(true)
     try {
       const value = await appClient.conversations.select(id)
       if (request === revision.current && selected.current === id) { setDetail(value); setProject(value.conversation.projectId ?? ''); setQuestion(drafts.current.get(id) ?? (value.conversation.responding ? '' : value.conversation.draft) ?? '') }
-    } catch (error) { if (request === revision.current) newChat(); reportError(error) } finally { if (request === revision.current) setLoading(false) }
-  }, [newChat])
+    } catch (error) { if (request === revision.current) { newChat(); reportError(error) } }
+    finally {
+      if (request === revision.current) {
+        opening.current = null; setLoading(false)
+        if (refreshPending.current === id) { refreshPending.current = null; refreshChat(id) }
+      }
+    }
+  }, [newChat, refreshChat])
   useEffect(() => {
     const key = params.toString()
     if (!key) { routeRequest.current = ''; return }

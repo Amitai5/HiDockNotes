@@ -16,9 +16,24 @@ export async function registerUploads(app: FastifyInstance, dataPath: string, re
     if (!value || typeof value.filename !== 'string' || basename(value.filename) !== value.filename || !/\.(wav|hda|mp3|m4a|mp4|webm|ogg|flac|aac|opus)$/i.test(value.filename) || value.filename.length > 200 || !Number.isSafeInteger(value.size) || value.size < 1 || value.size > 2 * 1024 ** 3 || !/^[a-f0-9]{64}$/.test(value.checksum)) throw new Error('Choose an audio file up to 2 GB with a SHA-256 checksum.')
     if (value.serial !== undefined && (typeof value.serial !== 'string' || !/^[\w-]{1,100}$/.test(value.serial) || value.deviceFilename !== value.filename)) throw new Error('Invalid recorder identity.')
     const projectId=value.projectId??null
-    if(projectId!==null&&(typeof projectId!=='string'||!/^[a-zA-Z0-9_-]{1,80}$/.test(projectId)||!queryOne('SELECT id FROM projects WHERE id=?',[projectId])))throw Error('The destination project no longer exists. Choose another project.')
+    if(projectId!==null&&(typeof projectId!=='string'||!/^[a-zA-Z0-9_-]{1,80}$/.test(projectId)))throw Error('The destination project no longer exists. Choose another project.')
     if(value.requestId!==undefined&&(typeof value.requestId!=='string'||!/^[a-f0-9-]{36}$/i.test(value.requestId)))throw Error('Invalid upload request identity.')
-    if(value.requestId){const existing=queryOne<Upload>('SELECT * FROM server_uploads WHERE request_id=?',[value.requestId]);if(existing){if(existing.project_id!==projectId||existing.checksum!==value.checksum||existing.size!==value.size||existing.filename!==value.filename||existing.serial!==(value.serial??null))throw Error('This upload request was already used for another destination or file.');return existing}}
+    if (value.requestId) {
+      const existing = queryOne<Upload>('SELECT * FROM server_uploads WHERE request_id=?', [value.requestId])
+      if (existing) {
+        if (existing.project_id !== projectId || existing.checksum !== value.checksum || existing.size !== value.size || existing.filename !== value.filename || existing.serial !== (value.serial ?? null)) throw Error('This upload request was already used for another destination or file.')
+        if (existing.state !== 'failed') return existing
+        return locked(existing.id, async () => {
+          const current = get(existing.id)
+          if (current.state !== 'failed') return current
+          const file = await open(join(folder, current.id), 'w', 0o600)
+          try { await file.sync() } finally { await file.close() }
+          run("UPDATE server_uploads SET state='uploading',offset=0 WHERE id=?", [current.id])
+          return get(current.id)
+        })
+      }
+    }
+    if (projectId !== null && !queryOne('SELECT id FROM projects WHERE id=?', [projectId])) throw Error('The destination project no longer exists. Choose another project.')
     const recorded = value.recordedAt ? new Date(value.recordedAt) : new Date(); if (!Number.isFinite(recorded.getTime())) throw new Error('Invalid recording date.')
     const previous = queryOne<Upload>("SELECT * FROM server_uploads WHERE checksum=? AND size=? AND coalesce(serial,'')=? AND filename=? AND coalesce(project_id,'')=? AND state IN ('uploading','completed') ORDER BY created_at DESC LIMIT 1", [value.checksum, value.size, value.serial ?? '', value.filename, projectId??'']); if (previous) return previous
     const id = randomUUID(); const file = await open(join(folder, id), 'wx', 0o600); await file.close()
@@ -66,8 +81,28 @@ export async function registerUploads(app: FastifyInstance, dataPath: string, re
   }))
   app.post<{ Params: { id: string } }>('/api/v1/captures/:id/finish', async request => locked(request.params.id, async () => {
     const item = queryOne<{ id: string; bytes: number; state: string; serial: string; recording_id: string }>('SELECT * FROM server_captures WHERE id=?', [request.params.id]); if (!item) throw new Error('Capture not found.'); if (item.state === 'completed') return { recordingId: item.recording_id }; if (!item.bytes) throw new Error('The capture contains no audio.')
-    const filename = item.id + '.wav', destination = join(recordings, filename), pcm = await open(join(folder, item.id + '.pcm'), 'r'), file = await open(destination, 'w', 0o600)
-    try { const header = Buffer.alloc(44); header.write('RIFF'); header.writeUInt32LE(36 + item.bytes, 4); header.write('WAVEfmt ', 8); header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(2, 22); header.writeUInt32LE(16000, 24); header.writeUInt32LE(64000, 28); header.writeUInt16LE(4, 32); header.writeUInt16LE(16, 34); header.write('data', 36); header.writeUInt32LE(item.bytes, 40); await file.write(header); for await (const chunk of pcm.createReadStream({ autoClose: false, end: item.bytes - 1 })) await file.write(chunk as Buffer); await file.sync() } finally { await pcm.close(); await file.close() }
+    const filename = item.id + '.wav', destination = join(recordings, filename), pcm = await open(join(folder, item.id + '.pcm'), 'r')
+    try {
+      if ((await pcm.stat()).size !== item.bytes) throw new Error('The captured audio is incomplete. Its source has been kept for recovery.')
+      const file = await open(destination, 'w', 0o600)
+      try {
+        const write = async (buffer: Buffer): Promise<void> => {
+          let offset = 0
+          while (offset < buffer.length) {
+            const result = await file.write(buffer, offset, buffer.length - offset)
+            if (!result.bytesWritten) throw new Error('Capture storage is full. The source has been kept for recovery.')
+            offset += result.bytesWritten
+          }
+        }
+        const header = Buffer.alloc(44)
+        header.write('RIFF'); header.writeUInt32LE(36 + item.bytes, 4); header.write('WAVEfmt ', 8); header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(2, 22); header.writeUInt32LE(16000, 24); header.writeUInt32LE(64000, 28); header.writeUInt16LE(4, 32); header.writeUInt16LE(16, 34); header.write('data', 36); header.writeUInt32LE(item.bytes, 40)
+        await write(header)
+        let copied = 0
+        for await (const chunk of pcm.createReadStream({ autoClose: false, end: item.bytes - 1 })) { await write(chunk as Buffer); copied += (chunk as Buffer).length }
+        await file.sync()
+        if (copied !== item.bytes || (await file.stat()).size !== item.bytes + 44) throw new Error('The captured audio copy is incomplete. Its source has been kept for recovery.')
+      } finally { await file.close() }
+    } finally { await pcm.close() }
     const checksum = await hashFile(destination), id = runInTransaction(() => { const id = markRecordingDownloaded(filename, destination, { fileSize: item.bytes + 44 }); markRecordingVerified(filename, checksum, null); run("UPDATE recordings SET title=?,title_source='placeholder' WHERE id=? AND title IS NULL", [(item.state === 'interrupted' ? 'Interrupted capture ' : 'Live recording ') + new Date().toISOString(), id]); remeasureRecordingDuration(id); run("UPDATE server_captures SET state='completed',recording_id=? WHERE id=?", [id, item.id]); return id }); await unlink(join(folder, item.id + '.pcm')); ready(id); return { recordingId: id }
   }))
 }

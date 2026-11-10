@@ -51,3 +51,13 @@ describe('activating a web interface update', () => {
     await expect(activateWebUpdate(registration(null))).rejects.toThrow('Reload this page')
   })
 })
+
+it('requests activation after installation finishes if an early skip-waiting message was ignored', async () => {
+  vi.useFakeTimers()
+  const installing = new Worker(); installing.setState('installing')
+  installing.postMessage.mockImplementation(() => { if (installing.state === 'installed') installing.setState('activated') })
+  const task = activateWebUpdate(registration(null, null, installing)).then(() => true, () => false)
+  installing.setState('installed')
+  await vi.advanceTimersByTimeAsync(15000); expect(await task).toBe(true)
+  expect(installing.state).toBe('activated')
+})

@@ -5,6 +5,7 @@ export async function activateWebUpdate(registration: ServiceWorkerRegistration 
   if (worker.state === 'activated') return
   await new Promise<void>((resolve, reject) => {
     let settled = false
+    let requestedState: ServiceWorkerState | null = null
     const finish = (error?: Error): void => {
       if (settled) return
       settled = true; clearTimeout(timer); worker.removeEventListener('statechange', changed)
@@ -13,11 +14,16 @@ export async function activateWebUpdate(registration: ServiceWorkerRegistration 
     const changed = (): void => {
       if (worker.state === 'activated') finish()
       else if (worker.state === 'redundant') finish(new Error('The app update changed while loading. Try updating again.'))
+      else if ((worker.state === 'installed' || worker.state === 'installing') && requestedState !== worker.state) {
+        // An installing worker may not have registered its message handler yet.
+        // Request activation again once installation actually completes.
+        requestedState = worker.state
+        try { worker.postMessage({ type: 'SKIP_WAITING' }) } catch (error) { finish(error instanceof Error ? error : new Error('The app update could not start. Try updating again.')) }
+      }
     }
     const timer = setTimeout(() => finish(new Error('The app update did not finish. Check your connection and retry.')), 15000)
     worker.addEventListener('statechange', changed)
     changed()
-    try { if (!settled && (worker.state === 'installed' || worker.state === 'installing')) worker.postMessage({ type: 'SKIP_WAITING' }) } catch (error) { finish(error instanceof Error ? error : new Error('The app update could not start. Try updating again.')) }
   })
 }
 

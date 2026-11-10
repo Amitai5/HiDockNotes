@@ -88,11 +88,19 @@ async function recover(): Promise<number> {
   for (const handle of handles) {
     const record = JSON.parse(await (await (await handle.getFileHandle('capture.json')).getFile()).text()) as CaptureRecord
     if (!/^[a-f0-9-]{36}$/.test(record.id) || !/^[\w-]{1,100}$/.test(record.serial)) throw new Error('Invalid browser capture recovery metadata.')
+    const chunks: string[] = []
+    let localBytes = 0
+    for await (const entry of (handle as FileSystemDirectoryHandle & { values(): AsyncIterableIterator<FileSystemHandle> }).values()) {
+      if (entry.kind !== 'file' || !/^\d{8}\.pcm$/.test(entry.name)) continue
+      const file = await (await handle.getFileHandle(entry.name)).getFile()
+      if (!file.size || file.size % 4) throw new Error('This browser capture has an incomplete audio chunk. Its remaining audio has been kept for recovery.')
+      chunks.push(entry.name); localBytes += file.size
+    }
+    chunks.sort()
+    if (chunks.some((name, index) => name !== String(index).padStart(8, '0') + '.pcm')) throw new Error('This browser capture has missing audio chunks. Its remaining audio has been kept for recovery.')
     let state = await request<ServerCapture>('/api/v1/captures/' + record.id + '/resume', {})
     if (state.state === 'completed') {
-      let bytes = 0
-      for await (const entry of (handle as FileSystemDirectoryHandle & { values(): AsyncIterableIterator<FileSystemHandle> }).values()) if (entry.kind === 'file' && /^\d{8}\.pcm$/.test(entry.name)) bytes += (await (await handle.getFileHandle(entry.name)).getFile()).size
-      if (bytes <= state.bytes) { await directory.removeEntry(handle.name, { recursive: true }); continue }
+      if (chunks.length <= state.frames && localBytes <= state.bytes) { await directory.removeEntry(handle.name, { recursive: true }); continue }
       // A finalized server prefix must not cause the browser's additional audio to be discarded.
       const recovered = await request<{ id: string }>('/api/v1/captures', { serial: record.serial }); record.id = recovered.id
       await save(handle, 'capture.json', JSON.stringify(record)); state = { id: record.id, state: 'recording', frames: 0, bytes: 0 }

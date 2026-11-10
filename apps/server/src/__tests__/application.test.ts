@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile, unlink } from 'node:fs/promises'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm, writeFile, unlink, open } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -75,4 +75,72 @@ it('accepts 4 MiB chunks, rejects larger bodies, and resumes with checksum verif
   expect((await app.inject({ method: 'POST', url: '/api/v1/uploads/' + id + '/complete', headers, payload: {} })).json().recording_id).toBe(done.json().recording_id)
   const saved = queryOne<{ checksum: string; verified: number }>('SELECT checksum,verified FROM recordings WHERE id=?', [done.json().recording_id])
   expect(saved).toEqual({ checksum: digest, verified: 1 })
+})
+
+it('restarts a checksum-failed upload when Retry reuses its original import request ID', async () => {
+  const requestId = 'b33fd7e6-fb55-4544-bd44-3bf0b3bab57b', metadata = { filename: 'meeting.wav', size: audio.length, checksum, requestId }
+  const begin = await app.inject({ method: 'POST', url: '/api/v1/uploads', headers, payload: metadata }), id = begin.json().id
+  const corrupt = Buffer.from(audio); corrupt[100] = 12
+  await chunk(id, 0, corrupt)
+  expect((await app.inject({ method: 'POST', url: '/api/v1/uploads/' + id + '/complete', headers, payload: {} })).statusCode).toBe(400)
+  const retry = await app.inject({ method: 'POST', url: '/api/v1/uploads', headers, payload: metadata })
+  expect(retry.statusCode, retry.body).toBe(200)
+  expect(retry.json()).toMatchObject({ id, offset: 0, state: 'uploading' })
+  expect((await chunk(id, 0, audio)).statusCode).toBe(200)
+  expect((await app.inject({ method: 'POST', url: '/api/v1/uploads/' + id + '/complete', headers, payload: {} })).json().recording_id).toBeTruthy()
+  expect((await rpc('library:list')).json().result).toHaveLength(1)
+})
+
+it('returns an acknowledged import on retry even if its destination project was subsequently deleted', async () => {
+  const project = (await rpc('projects:create', ['Temporary project'])).json().result
+  const metadata = { filename: 'meeting.wav', size: audio.length, checksum, projectId: project.id, requestId: 'fd32f8ea-cbb2-46fa-b3cc-b05e3e2023ea' }
+  const begin = await app.inject({ method: 'POST', url: '/api/v1/uploads', headers, payload: metadata }), id = begin.json().id
+  await chunk(id, 0, audio)
+  const completed = await app.inject({ method: 'POST', url: '/api/v1/uploads/' + id + '/complete', headers, payload: {} })
+  run('DELETE FROM projects WHERE id=?', [project.id])
+  const retry = await app.inject({ method: 'POST', url: '/api/v1/uploads', headers, payload: metadata })
+  expect(retry.statusCode, retry.body).toBe(200)
+  expect(retry.json()).toMatchObject({ id, state: 'completed', recording_id: completed.json().recording_id })
+  expect((await rpc('library:list')).json().result).toHaveLength(1)
+})
+
+it('does not verify or discard a live capture if its source PCM is shorter than its acknowledged byte count', async () => {
+  const begin = await app.inject({ method: 'POST', url: '/api/v1/captures', headers, payload: { serial: 'P1' } }), id = begin.json().id
+  await app.inject({ method: 'PUT', url: '/api/v1/captures/' + id + '?sequence=0', headers: { ...headers, 'content-type': 'application/octet-stream' }, payload: Buffer.alloc(64000) })
+  const source = join(folder, 'data', 'uploads', id + '.pcm')
+  await writeFile(source, Buffer.alloc(100))
+  const finished = await app.inject({ method: 'POST', url: '/api/v1/captures/' + id + '/finish', headers, payload: {} })
+  expect(finished.statusCode, finished.body).toBe(400)
+  expect((await readFile(source)).length).toBe(100)
+  expect((await rpc('library:list')).json().result).toHaveLength(0)
+  expect(queryOne<{ state: string }>('SELECT state FROM server_captures WHERE id=?', [id])?.state).toBe('recording')
+})
+
+it('writes every PCM byte even when the file system accepts only part of each write', async () => {
+  const begin = await app.inject({ method: 'POST', url: '/api/v1/captures', headers, payload: { serial: 'P1' } }), id = begin.json().id, pcm = Buffer.alloc(64000, 31)
+  await app.inject({ method: 'PUT', url: '/api/v1/captures/' + id + '?sequence=0', headers: { ...headers, 'content-type': 'application/octet-stream' }, payload: pcm })
+  const probe = await open(join(folder, 'write-probe'), 'w'), prototype = Object.getPrototypeOf(probe), original = prototype.write
+  await probe.close()
+  const writes = vi.spyOn(prototype, 'write').mockImplementation(function (this: unknown, buffer: Buffer, offset = 0, length = buffer.length, position: number | null = null) { return original.call(this, buffer, offset, Math.min(length, 997), position) })
+  try {
+    const finished = await app.inject({ method: 'POST', url: '/api/v1/captures/' + id + '/finish', headers, payload: {} })
+    expect(finished.statusCode, finished.body).toBe(200)
+    const saved = await readFile(join(folder, 'data', 'recordings', id + '.wav'))
+    expect(saved.length).toBe(pcm.length + 44)
+    expect(saved.subarray(44)).toEqual(pcm)
+  } finally { writes.mockRestore() }
+})
+
+it('retains capture sources and rejects completion if storage accepts zero bytes', async () => {
+  const begin = await app.inject({ method: 'POST', url: '/api/v1/captures', headers, payload: { serial: 'P1' } }), id = begin.json().id
+  await app.inject({ method: 'PUT', url: '/api/v1/captures/' + id + '?sequence=0', headers: { ...headers, 'content-type': 'application/octet-stream' }, payload: Buffer.alloc(64000) })
+  const probe = await open(join(folder, 'write-probe'), 'w'), prototype = Object.getPrototypeOf(probe)
+  await probe.close()
+  const writes = vi.spyOn(prototype, 'write').mockResolvedValue({ bytesWritten: 0 })
+  try {
+    const finished = await app.inject({ method: 'POST', url: '/api/v1/captures/' + id + '/finish', headers, payload: {} })
+    expect(finished.statusCode, finished.body).toBe(400)
+    expect((await readFile(join(folder, 'data', 'uploads', id + '.pcm'))).length).toBe(64000)
+    expect((await rpc('library:list')).json().result).toHaveLength(0)
+  } finally { writes.mockRestore() }
 })
