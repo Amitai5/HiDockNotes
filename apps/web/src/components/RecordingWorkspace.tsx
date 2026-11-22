@@ -3,7 +3,7 @@ import { uiScale } from '../services/ui-scale'
 
 const MIN_PANEL = 300
 const DEFAULT_PANEL = 432
-export function RecordingWorkspace({ notes, media, mediaOpen = true, onMediaOpenChange }: { notes: ReactNode; media: ReactNode; mediaOpen?: boolean; onMediaOpenChange?(value: boolean): void }): JSX.Element {
+export function RecordingWorkspace({ notes, media, header, mediaOpen = true, onMediaOpenChange }: { header?: ReactNode; notes: ReactNode; media: ReactNode; mediaOpen?: boolean; onMediaOpenChange?(value: boolean): void }): JSX.Element {
   const [mobileView, setMobileView] = useState<'notes' | 'media'>('notes')
   useEffect(() => { if (!mediaOpen) setMobileView('notes') }, [mediaOpen])
   const root = useRef<HTMLDivElement>(null)
@@ -16,15 +16,16 @@ export function RecordingWorkspace({ notes, media, mediaOpen = true, onMediaOpen
     if (!element || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
       // Stacked layouts should preserve the user's desktop pane width.
-      if (element.clientWidth <= 780) return
-      const max = Math.max(MIN_PANEL, Math.floor(element.clientWidth - 350))
+      if (element.clientWidth < 960) return
+      const max = Math.max(MIN_PANEL, Math.floor(element.clientWidth - 480 - 8))
       setMaximum(max); setWidth(value => Math.min(max, Math.max(MIN_PANEL, value)))
     })
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
   const resize = (value: number): void => setWidth(Math.max(MIN_PANEL, Math.min(maximum, value)))
-  return <div ref={root} className={`recording-workspace${mediaOpen ? '' : ' without-media'}`} data-mobile-view={mobileView} data-resizing={resizing} style={{ '--media-width': `${width}px` } as CSSProperties}>
+  return <div ref={root} className={`recording-workspace${mediaOpen ? '' : ' without-media'}${header ? ' has-header' : ''}`} data-mobile-view={mobileView} data-resizing={resizing} style={{ '--media-width': `${width}px` } as CSSProperties}>
+    {header && <div className="recording-workspace-header">{header}</div>}
     <div className="recording-mobile-tabs" role="group" aria-label="Recording view"><button aria-pressed={mobileView === 'notes'} onClick={() => setMobileView('notes')}>Summary</button><button aria-pressed={mobileView === 'media'} onClick={() => { onMediaOpenChange?.(true); setMobileView('media') }}>Audio &amp; transcript</button></div>
     <div className="recording-main-scroll">{notes}</div>
     {mediaOpen && <div className="recording-resizer" role="separator" aria-label="Resize audio and transcript sidebar" aria-orientation="vertical" aria-valuemin={MIN_PANEL} aria-valuemax={maximum} aria-valuenow={width} tabIndex={0}

@@ -85,7 +85,7 @@ describe('mixed library workspace and flat navigation', () => {
     useAppStore.setState({ search: 'Research' }); show(); const link = await screen.findByRole('link', { name: /Prepared brief/ }); expect(link).toHaveAttribute('href', '/notes/written?project=team'); fireEvent.click(link); expect(screen.getByTestId('route')).toHaveTextContent('/notes/written?project=team')
   })
   it('keeps project context and creation controls in the contents rail and creates an idempotent note', async () => {
-    const { container } = show('/library?project=team'); await screen.findByRole('heading', { name: 'Team', level: 1 }); const actions = within(container.querySelector('.project-workspace-actions') as HTMLElement).getAllByRole('button'); expect(actions.map(button => button.textContent)).toEqual(['New note', 'From audio']); expect(screen.getByRole('button', { name: 'Project context' })).toBeVisible(); expect(screen.getByRole('button', { name: 'Catch me up' })).toBeVisible(); fireEvent.click(actions[0]); await waitFor(() => expect(appClient.notes.create).toHaveBeenCalledWith({ requestId: expect.any(String), projectId: 'team' })); expect(await screen.findByTestId('route')).toHaveTextContent('/notes/new-note?project=team&focusTitle=1')
+    const { container } = show('/library?project=team'); await screen.findByRole('heading', { name: 'Team', level: 1 }); const actions = within(container.querySelector('.project-workspace-actions') as HTMLElement).getAllByRole('button'); expect(actions.map(button => button.textContent)).toEqual(['New note']); expect(screen.getByRole('button', { name: 'New note from audio' })).toBeVisible(); expect(screen.getByRole('button', { name: 'Project context' })).toBeVisible(); expect(screen.getByRole('button', { name: 'Catch me up' })).toBeVisible(); fireEvent.click(actions[0]); await waitFor(() => expect(appClient.notes.create).toHaveBeenCalledWith({ requestId: expect.any(String), projectId: 'team' })); expect(await screen.findByTestId('route')).toHaveTextContent('/notes/new-note?project=team&focusTitle=1')
   })
   it('reuses a creation request after a lost response rather than duplicating the note', async () => {
     vi.mocked(appClient.notes.create).mockRejectedValueOnce(Error('Connection lost')); show('/library?project=team'); fireEvent.click(screen.getAllByRole('button', { name: 'New note' })[0]); await screen.findByRole('alert'); fireEvent.click(screen.getByRole('button', { name: 'Retry new note' })); await screen.findByTestId('route'); expect(vi.mocked(appClient.notes.create).mock.calls[0][0]).toEqual(vi.mocked(appClient.notes.create).mock.calls[1][0])
@@ -138,4 +138,19 @@ it('keeps the move dialog stable and focuses the project heading after the last 
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Team', level: 1 })).toHaveFocus())
   expect(screen.getByRole('status')).toHaveTextContent('Moved to Empty project.')
   expect(appClient.projects.assign).toHaveBeenCalledExactlyOnceWith('call', 'empty')
+})
+
+it('folds project contents without losing the selected note or the current list filter', async () => {
+  appClient.notes.get = vi.fn(async id => ({ kind: 'note', id, title: 'Prepared brief', projectId: 'team', projectName: 'Team', revision: 4 } as never))
+  showWorkspace('/notes/written?project=team')
+  const note = await screen.findByTestId('selected-note'), filter = screen.getByRole('textbox', { name: 'Filter project contents' })
+  fireEvent.change(filter, { target: { value: 'Prepared' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Hide project contents' }))
+  expect(screen.getByRole('button', { name: 'Show project contents' })).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.getByTestId('selected-note')).toBe(note)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show project contents' }))
+  expect(screen.getByRole('textbox', { name: 'Filter project contents' })).toBe(filter)
+  expect(filter).toHaveValue('Prepared')
+  expect(screen.getByTestId('selected-note')).toBe(note)
 })

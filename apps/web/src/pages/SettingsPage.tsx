@@ -22,7 +22,8 @@ export function SettingsPage(): JSX.Element {
   const settings = useAppStore(s => s.settings)
   const [params, setParams] = useSearchParams()
   const tab: SettingsTab = SETTINGS_TABS.some(value => value.id === params.get('tab')) ? params.get('tab') as SettingsTab : 'general'
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(''), [searchExpanded, setSearchExpanded] = useState(false)
+  const searchInput = useRef<HTMLInputElement>(null), searchTrigger = useRef<HTMLButtonElement>(null)
   const [name, setName] = useState('')
   const [saved, setSaved] = useState(false)
   const [version, setVersion] = useState<{ version: string; runtime: string; platform: string } | null>(null)
@@ -37,11 +38,12 @@ export function SettingsPage(): JSX.Element {
     return () => clearTimeout(timer)
   }, [focus, tab])
   function select(value: SettingsTab, id?: string): void {
-    setQuery('')
+    setQuery(''); setSearchExpanded(false)
     setParams(id ? { tab: value, focus: id } : { tab: value }, { replace: true })
   }
   return <div className="page settings-page">
-    <aside className="settings-navigation"><div className="page-heading"><div><h1>Settings</h1></div><div className="settings-search input-with-icon"><Search size={16} /><input aria-label="Search settings" placeholder="Search settings…" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setQuery(''); if (event.key === 'Enter' && results[0]) select(results[0].tab, results[0].id) }} />{query && <button aria-label="Clear settings search" onClick={() => setQuery('')}><X size={14} /></button>}</div></div>
+    <aside className="settings-navigation" data-search-expanded={searchExpanded || !!query}><div className="page-heading"><div><h1>Settings</h1></div><Button ref={searchTrigger} className="mobile-settings-search-toggle" variant="ghost" aria-label={searchExpanded ? 'Close settings search' : 'Find a setting'} aria-expanded={searchExpanded || !!query} aria-controls="settings-search-field" onClick={() => { const next = !searchExpanded; setSearchExpanded(next); if (next) requestAnimationFrame(() => searchInput.current?.focus()); else { setQuery(''); searchTrigger.current?.focus() } }}><Search size={20} /></Button><div id="settings-search-field" className="settings-search input-with-icon"><Search size={16} /><input ref={searchInput} aria-label="Search settings" placeholder="Search settings…" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { setQuery(''); setSearchExpanded(false); if (searchTrigger.current?.getClientRects().length) searchTrigger.current.focus() }; if (event.key === 'Enter' && results[0]) select(results[0].tab, results[0].id) }} />{query && <button aria-label="Clear settings search" onClick={() => setQuery('')}><X size={14} /></button>}</div></div>
+    <label className="mobile-settings-category"><span className="sr-only">Settings category</span><select aria-label="Settings category" value={tab} onChange={event => select(event.target.value as SettingsTab)}>{SETTINGS_TABS.map(value => <option key={value.id} value={value.id}>{value.label}</option>)}</select></label>
     <div className="settings-tabs" role="tablist" aria-label="Settings categories" ref={tabs}>{SETTINGS_TABS.map((value, index) => {
       const Icon = tabIcons[value.id]
       return <button key={value.id} id={`settings-tab-${value.id}`} role="tab" aria-selected={tab === value.id} aria-controls={`settings-panel-${value.id}`} tabIndex={tab === value.id ? 0 : -1} onClick={() => select(value.id)} onKeyDown={event => {

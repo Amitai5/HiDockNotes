@@ -13,8 +13,8 @@ export function AssistantWorkspace({ chat, source }: { chat: ReactNode; source: 
     if (!element || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
       // Stacked layouts should preserve the user's desktop pane width.
-      if (window.innerWidth <= 800) return
-      const max = Math.max(MIN_SOURCE, Math.min(650, element.clientWidth - 350))
+      if (element.clientWidth <= 1040) return
+      const max = Math.max(MIN_SOURCE, Math.min(650, element.clientWidth - 560 - 6))
       setMaximum(max); setWidth(value => Math.max(MIN_SOURCE, Math.min(max, value)))
     })
     observer.observe(element)

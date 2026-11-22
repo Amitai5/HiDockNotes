@@ -12,6 +12,7 @@ import { AssistantAnswer } from '../components/AssistantAnswer'
 import { AssistantWorkspace } from '../components/AssistantWorkspace'
 import { AssistantSourcePanel } from '../components/AssistantSourcePanel'
 import { ConversationHistory } from '../components/ConversationHistory'
+import { ResponsiveActions } from '../components/ResponsiveActions'
 import { BrandMark } from '../components/BrandMark'
 
 const sourceKey = (source: SourceCitation): string => source.kind === 'note' ? `note:${source.noteId}:${source.revision}:${source.blockId}` : `recording:${source.recordingId}:${source.start}`
@@ -49,7 +50,13 @@ export function AssistantPage(): JSX.Element {
     return () => { mounted = false; mountedRef.current = false; opening.current = null; refreshPending.current = null; routeRequest.current = ''; ++revision.current; ++refreshRevision.current; offAI(); offChat() }
   }, [refreshChat])
   useEffect(() => { const conversation = end.current?.parentElement; conversation?.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' }) }, [detail?.messages.at(-1)?.id, pending])
-  useEffect(() => { const textarea = composer.current; if (textarea) { textarea.style.height = 'auto'; textarea.style.height = `${Math.max(68, Math.min(180, textarea.scrollHeight))}px` } }, [question])
+  useEffect(() => {
+    const textarea = composer.current
+    if (!textarea) return
+    const style = getComputedStyle(textarea), minimum = Number.parseFloat(style.getPropertyValue('--composer-min-height')) || 68, maximum = Number.parseFloat(style.getPropertyValue('--composer-max-height')) || 180
+    // Measure the content instead of the empty rows attribute, which crowds phone conversations.
+    textarea.style.height = '0px'; textarea.style.height = `${Math.max(minimum, Math.min(maximum, textarea.scrollHeight))}px`
+  }, [question])
   const usingPlan = state?.settings.chat.provider === 'chatgpt'
   const ready = usingPlan ? !!state?.chatgpt?.planEnabled && !state.chatgpt.usageBlocked : !!state?.providers.find(provider => provider.provider === state.settings.chat.provider)?.verified
   const busy = !!detail?.conversation.responding || !!sending && sending === detail?.conversation.id
@@ -114,7 +121,7 @@ export function AssistantPage(): JSX.Element {
     } catch (error) { reportError(error) } finally { setEarlierLoading(false) }
   }
   function closeSource(): void { setSource(null); sourceTrigger.current?.focus() }
-  return <AssistantWorkspace chat={<div className="page assistant-page"><div className="page-heading"><div><h1 title={detail?.conversation.title}>{detail?.conversation.title ?? 'Assistant'}</h1></div><div className="assistant-header-actions"><ConversationHistory openRequest={historyRequest} selected={detail?.conversation.id ?? null} onSelect={id => setParams({ chat: id })} onSaved={value => { if (selected.current === value.conversation.id) setDetail(value) }} onDeleted={id => { drafts.current.delete(id); if (selected.current === id) newChat() }} /><Button aria-label="New chat" onClick={() => setParams({ new: randomId() })}><Plus size={15} />New chat</Button><select aria-label="Assistant project" value={project} onChange={event => { newChat(event.target.value); setParams({}) }}><option value="">All projects</option>{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div></div>
+  return <AssistantWorkspace chat={<div className="page assistant-page"><div className="page-heading"><div><h1 title={detail?.conversation.title}>{detail?.conversation.title ?? 'Assistant'}</h1></div><ResponsiveActions label="Chat options" className="assistant-header-actions"><ConversationHistory openRequest={historyRequest} selected={detail?.conversation.id ?? null} onSelect={id => setParams({ chat: id })} onSaved={value => { if (selected.current === value.conversation.id) setDetail(value) }} onDeleted={id => { drafts.current.delete(id); if (selected.current === id) newChat() }} /><Button data-close-actions aria-label="New chat" onClick={() => setParams({ new: randomId() })}><Plus size={15} />New chat</Button><label className="assistant-project-field"><span>Project</span><select aria-label="Assistant project" value={project} onChange={event => { newChat(event.target.value); setParams({}) }}><option value="">All projects</option>{projects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></ResponsiveActions></div>
     {!ready && <div className="processing-banner"><div><MessageSquare size={17} /><strong>{usingPlan && state?.chatgpt?.usageBlocked ? 'ChatGPT plan requests are paused. Review Manage usage and retry in Settings.' : 'Connect your selected chat provider in Settings to ask questions.'}</strong><Link to="/settings?tab=ai">Set up AI</Link></div></div>}
     <div className="conversation" role="log" aria-label="Conversation" aria-live="polite" aria-busy={loading}>
       {loading ? <p className="muted">Opening chat…</p> : <>{detail?.hasEarlier && <Button className="load-earlier" busy={earlierLoading} onClick={() => { void loadEarlier() }}>Load earlier messages</Button>}{detail?.messages.length ? detail.messages.map(message => <div className={`chat-message chat-${message.role}`} key={message.id}><strong>{message.role === 'user' ? 'You' : 'Assistant'}</strong>{message.role === 'assistant' ? <AssistantAnswer message={message} title={detail.conversation.title} projectId={detail.conversation.projectId} projects={projects} activeSource={source ? sourceKey(source) : null} onSource={(citation, trigger) => { sourceTrigger.current = trigger; setSource(citation) }} /> : <p>{message.content}</p>}</div>) : !busy && <EmptyState icon={<BrandMark size={64} />} title="What would you like to find?">Find decisions, answers, or next steps.</EmptyState>}

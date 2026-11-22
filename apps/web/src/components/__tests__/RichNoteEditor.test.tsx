@@ -56,3 +56,16 @@ it('inserts editable tables and dividers using the existing server document form
   fireEvent.click(screen.getByRole('button', { name: 'Insert divider' }))
   await waitFor(() => expect(JSON.stringify(validateNoteDocument(change.mock.calls.at(-1)![0])).includes('horizontalRule')).toBe(true))
 })
+
+it('opens formatting without replacing the editor or losing the current document', async () => {
+  render(<RichNoteEditor document={document} disabled={false} onChange={() => undefined} />)
+  const body = await screen.findByRole('textbox', { name: 'Note body' }), toggle = screen.getByRole('button', { name: 'Formatting' })
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  fireEvent.click(toggle)
+  expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  expect(screen.getByRole('combobox', { name: 'Text style' })).toBeEnabled()
+  fireEvent.click(toggle)
+  expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.getByRole('textbox', { name: 'Note body' })).toBe(body)
+  expect(body).toHaveTextContent('Safe evidence')
+})

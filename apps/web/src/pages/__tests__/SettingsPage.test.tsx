@@ -82,3 +82,24 @@ describe('searchable Settings tabs', () => {
     await waitFor(() => expect(appClient.backups.create).toHaveBeenCalledOnce())
   })
 })
+
+it('switches mobile categories while keeping unsaved settings drafts', async () => {
+  render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+  fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Kept mobile draft' } })
+  fireEvent.change(screen.getByRole('combobox', { name: 'Settings category' }), { target: { value: 'ai' } })
+  expect(screen.getByRole('tab', { name: 'AI & transcription' })).toHaveAttribute('aria-selected', 'true')
+  fireEvent.change(screen.getByRole('combobox', { name: 'Settings category' }), { target: { value: 'general' } })
+  expect(screen.getByLabelText('Your name')).toHaveValue('Kept mobile draft')
+})
+
+it('reveals and dismisses mobile settings search without leaving stale filters', () => {
+  render(<MemoryRouter><SettingsPage /></MemoryRouter>)
+  fireEvent.click(screen.getByRole('button', { name: 'Find a setting' }))
+  expect(screen.getByRole('button', { name: 'Close settings search' })).toHaveAttribute('aria-expanded', 'true')
+  fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'language' } })
+  expect(screen.getByRole('region', { name: 'Settings search results' })).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Close settings search' }))
+  expect(screen.getByLabelText('Search settings')).toHaveValue('')
+  expect(screen.getByRole('button', { name: 'Find a setting' })).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.queryByRole('region', { name: 'Settings search results' })).toBeNull()
+})

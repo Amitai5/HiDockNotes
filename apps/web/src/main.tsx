@@ -5,6 +5,7 @@ import './styles.css'
 import './notes.css'
 import './redesign.css'
 import './mobile.css'
+import './workspace-layout.css'
 import { AuthGate } from './components/AuthGate'
 import { initializePwa } from './components/WebUpdatesPanel'
 

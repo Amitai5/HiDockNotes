@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createMemoryRouter, Link, RouterProvider } from 'react-router-dom'
 import { appClient, setAppClient } from '../../services/app-client'
 import type { AppClient } from '../../shared/contracts'
@@ -44,4 +44,17 @@ describe('note editor server save and recovery flows', () => {
   it('requires explicit confirmation before deleting a written note', async () => {
     show(); await screen.findByLabelText('Note body'); fireEvent.click(screen.getByLabelText('Note actions')); fireEvent.click(screen.getByRole('button', { name: 'Delete note' })); expect(appClient.notes.delete).not.toHaveBeenCalled(); expect(screen.getByRole('alertdialog')).toHaveTextContent('saved document, tags, recent revisions'); fireEvent.click(screen.getByRole('button', { name: 'Delete note', exact: true })); await waitFor(() => expect(appClient.notes.delete).toHaveBeenCalledWith(current.id, 1, true)); expect(await screen.findByRole('heading', { name: 'Library' })).toBeVisible()
   })
+})
+
+it('returns history focus to the actual mobile action when the browser does not focus tapped buttons', async () => {
+  appClient.notes.history = vi.fn(async () => [])
+  show(); await screen.findByLabelText('Note body')
+  fireEvent.click(screen.getByLabelText('Note actions'))
+  const menu = document.querySelector('details.note-actions-menu') as HTMLDetailsElement
+  const history = within(menu).getByRole('button', { name: 'Note history', exact: true })
+  screen.getByLabelText('Note body').focus()
+  fireEvent.click(history)
+  await screen.findByRole('dialog', { name: 'Note history' })
+  fireEvent.click(screen.getByRole('button', { name: 'Close note history' }))
+  await waitFor(() => expect(history).toHaveFocus())
 })
